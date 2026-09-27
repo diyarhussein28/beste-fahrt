@@ -276,6 +276,19 @@ async def set_driver_consent(chat_id: int, consent: bool) -> bool:
         return (result.rowcount or 0) > 0
 
 
+async def set_driver_shift_status(chat_id: int, status: DriverStatus) -> bool:
+    """Driver self-service shift toggle (/available, /offline). Without this,
+    a driver stays at the 'off_duty' default forever and never gets ranked —
+    ranked_drivers_for_job only considers status = 'available'.
+    """
+    async with get_engine().begin() as conn:
+        result = await conn.execute(
+            text("UPDATE drivers SET status = :status WHERE telegram_chat_id = :chat_id AND active"),
+            {"status": status.value, "chat_id": chat_id},
+        )
+        return (result.rowcount or 0) > 0
+
+
 async def set_driver_home(driver_id: int, lat: float, lon: float, city: str | None) -> None:
     async with get_engine().begin() as conn:
         await conn.execute(

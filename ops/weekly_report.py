@@ -23,7 +23,7 @@ def _fmt_seconds(value: float | None) -> str:
     if value is None:
         return "—"
     minutes = value / 60
-    return f"{minutes:.1f} دقيقة" if minutes >= 1 else f"{value:.0f} ثانية"
+    return f"{minutes:.1f} Min." if minutes >= 1 else f"{value:.0f} Sek."
 
 
 def _fmt_pct(value: float | None) -> str:
@@ -36,15 +36,15 @@ def _fmt_num(value: float | None, unit: str) -> str:
 
 def render_report(kpis: Kpis) -> str:
     lines = [
-        f"📊 تقرير الأداء الأسبوعي (آخر {kpis.window_days} أيام)",
-        f"⏱️ زمن التوجيه (متوسط): {_fmt_seconds(kpis.discovery_to_dispatch_avg_s)}",
-        f"✅ نسبة القبول: {_fmt_pct(kpis.acceptance_rate)}",
-        f"⌛ عمر العرض في السوق: {_fmt_seconds(kpis.market_age_avg_s)}",
-        f"🔁 نسبة العودة المدفوعة: {_fmt_pct(kpis.return_rate)}",
-        f"🛣️ الكم الفارغ لكل رحلة: {_fmt_num(kpis.avg_deadhead_km, 'كم')}",
-        f"💶 الإيراد لكل كم: {_fmt_num(kpis.avg_eur_per_km, '€/كم')}",
-        f"🎯 ربحية الجولة (ذهاب+عودة): {_fmt_num(kpis.round_trip_eur_per_km, '€/كم')}",
-        f"🚆 تكلفة القطار الموفّرة (تقديرية): {_fmt_num(kpis.train_cost_saved_eur, '€')}",
+        f"📊 Wochenbericht (letzte {kpis.window_days} Tage)",
+        f"⏱️ Zustellzeit (Ø): {_fmt_seconds(kpis.discovery_to_dispatch_avg_s)}",
+        f"✅ Annahmequote: {_fmt_pct(kpis.acceptance_rate)}",
+        f"⌛ Angebotsalter am Markt: {_fmt_seconds(kpis.market_age_avg_s)}",
+        f"🔁 Anteil bezahlter Rückfahrten: {_fmt_pct(kpis.return_rate)}",
+        f"🛣️ Leerkilometer pro Fahrt: {_fmt_num(kpis.avg_deadhead_km, 'km')}",
+        f"💶 Umsatz pro km: {_fmt_num(kpis.avg_eur_per_km, '€/km')}",
+        f"🎯 Tour-Rentabilität (Hin+Rück): {_fmt_num(kpis.round_trip_eur_per_km, '€/km')}",
+        f"🚆 Ersparte Zugkosten (geschätzt): {_fmt_num(kpis.train_cost_saved_eur, '€')}",
     ]
     return "\n".join(lines)
 

@@ -116,7 +116,7 @@ async def process_cycle(parser: OfferParser, page, empty_streak: int) -> int:
     empty_streak = empty_streak + 1 if not raw_offers else 0
     if empty_streak == EMPTY_RESULT_ALERT_THRESHOLD:
         await alert_manager(
-            f"لم يُعثر على أي عروض في آخر {empty_streak} دورة — ربما تغيّر تصميم المنصة"
+            f"Keine Angebote in den letzten {empty_streak} Durchläufen gefunden — möglicherweise hat sich das Plattform-Design geändert"
         )
     return empty_streak
 
@@ -152,13 +152,13 @@ async def run() -> None:
                 backoff = float(cfg.polling.base_seconds)
 
             except LoginBlocked as e:
-                await alert_manager(f"توقف تسجيل الدخول: {e} — بانتظار تدخّل يدوي")
+                await alert_manager(f"Anmeldung gestoppt: {e} — wartet auf manuelles Eingreifen")
                 await asyncio.sleep(cfg.polling.max_backoff_seconds)
             except RateLimited:
-                await alert_manager("تم تقييد المعدل من المنصة — إيقاف مؤقت")
+                await alert_manager("Von der Plattform ratenbegrenzt — vorübergehend pausiert")
                 await asyncio.sleep(cfg.polling.rate_limit_pause_seconds)
             except PlatformChanged as e:
-                await alert_manager(f"احتمال تغيّر في تصميم المنصة: {e}")
+                await alert_manager(f"Mögliche Änderung im Plattform-Design: {e}")
                 backoff = min(backoff * 2, cfg.polling.max_backoff_seconds)
             except Exception:
                 log.exception("unexpected error in collector cycle")

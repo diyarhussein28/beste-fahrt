@@ -43,7 +43,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # القسم 10: قائمة بيضاء بـ chat_id — تجاهل أي رسالة من غير سائق مسجّل
         # أو من سائق أوقفه المدير عبر /remove_driver.
         log.warning("callback from unknown/inactive chat_id ignored", extra={"extra_fields": {"chat_id": chat_id}})
-        await query.answer("غير مصرح")
+        await query.answer("Nicht autorisiert")
         return
 
     action, _, rest = query.data.partition(":")
@@ -53,17 +53,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if action == "acc" or action == "accboth":
         claimed = await try_claim_job(job_fp, JobStatus.DISPATCHED)
         if not claimed:
-            await query.answer("تم أخذها من سائق آخر بالفعل")
-            await query.edit_message_text(query.message.text + "\n\n🚫 تم أخذها من سائق آخر")
+            await query.answer("Wurde bereits von einem anderen Fahrer angenommen")
+            await query.edit_message_text(query.message.text + "\n\n🚫 Wurde von einem anderen Fahrer übernommen")
             return
         await record_dispatch_response(job_fp, driver.id, "accept")
-        await query.answer("تم تسجيل قبولك")
-        await query.edit_message_text(query.message.text + "\n\n✅ لقد قبلت هذا العرض — افتح الرابط واحجزه في التطبيق")
+        await query.answer("Annahme registriert")
+        await query.edit_message_text(query.message.text + "\n\n✅ Du hast diesen Auftrag angenommen — öffne den Link und buche ihn in der App")
         secrets = get_secrets()
         if secrets.telegram_manager_chat_id:
             await context.bot.send_message(
                 secrets.telegram_manager_chat_id,
-                f"✅ {driver.name} قبل العرض {job_fp[:8]}…",
+                f"✅ {driver.name} hat den Auftrag {job_fp[:8]}… angenommen.",
             )
 
         # القسم 8.2: قبول رحلة ذهاب يفتح تلقائياً طلب عودة مفتوح، إلا إذا كان
@@ -78,19 +78,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     elif action == "dec":
         await record_dispatch_response(job_fp, driver.id, "decline")
-        await query.answer("تم تسجيل الرفض")
-        await query.edit_message_text(query.message.text + "\n\n❌ تم الرفض")
+        await query.answer("Ablehnung registriert")
+        await query.edit_message_text(query.message.text + "\n\n❌ Abgelehnt")
 
     elif action == "skip_return":
         watch_id = int(parts[1])
-        await query.answer("سنواصل البحث عن عودة أخرى")
-        await query.edit_message_text(query.message.text + "\n\n⏭️ يواصل النظام البحث عن رحلة عودة أخرى")
+        await query.answer("Wir suchen weiter nach einer Rückfahrt")
+        await query.edit_message_text(query.message.text + "\n\n⏭️ Das System sucht weiter nach einer anderen Rückfahrt")
         await reopen_watch(watch_id)
 
     elif action == "declare_train":
         watch_id = int(parts[1])
-        await query.answer("تم التسجيل — عودة سعيدة")
-        await query.edit_message_text(query.message.text + "\n\n🚆 سيعود السائق بالقطار")
+        await query.answer("Registriert — gute Heimfahrt")
+        await query.edit_message_text(query.message.text + "\n\n🚆 Fahrer fährt mit dem Zug zurück")
         await close_watch(watch_id, WatchStatus.CLOSED)
 
     else:
@@ -112,7 +112,7 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     if not driver.location_consent:
         # القسم 11.3: التتبّع فقط بموافقة صريحة.
-        await update.message.reply_text("لم تُفعّل مشاركة الموقع بعد — تواصل مع المدير لتفعيلها.")
+        await update.message.reply_text("Standortfreigabe ist noch nicht aktiviert — sende /consent_on, um sie zu aktivieren.")
         return
 
     await record_driver_location(driver.id, location.latitude, location.longitude, source="live_share")
@@ -237,6 +237,9 @@ async def run() -> None:
     _APP.add_handler(CommandHandler("start", manager_commands.cmd_start))
     _APP.add_handler(CommandHandler("consent_on", manager_commands.cmd_consent_on))
     _APP.add_handler(CommandHandler("consent_off", manager_commands.cmd_consent_off))
+    _APP.add_handler(CommandHandler("available", manager_commands.cmd_available))
+    _APP.add_handler(CommandHandler("offline", manager_commands.cmd_offline))
+    _APP.add_handler(CommandHandler("location", manager_commands.cmd_location))
     _APP.add_handler(CommandHandler("drivers", manager_commands.cmd_drivers))
     _APP.add_handler(CommandHandler("add_driver", manager_commands.cmd_add_driver))
     _APP.add_handler(CommandHandler("remove_driver", manager_commands.cmd_remove_driver))

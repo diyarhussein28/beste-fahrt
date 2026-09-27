@@ -42,7 +42,7 @@ def test_render_offer_alert_contains_key_fields():
     assert "4.2" in text
     assert "65,00" in text or "65.00" in text
     assert job.url in text
-    assert buttons == [[("✅ سآخذها", f"acc:{job.fp}"), ("❌ لا أستطيع", f"dec:{job.fp}")]]
+    assert buttons == [[("✅ Ich nehme ihn an", f"acc:{job.fp}"), ("❌ Kann ich nicht", f"dec:{job.fp}")]]
 
 
 def test_render_offer_alert_redacts_address_by_default():
@@ -84,9 +84,9 @@ def test_render_return_alert_has_train_option():
         net_value=200.0, wait_penalty=0.0, return_score=200.0, category="A",
     )
     text, buttons = render_return_alert(ret, hours_after_eta=1.4, km_from_home=3.0, privacy=PRIVACY_FULL, watch_id=42)
-    assert "رحلة عودة" in text
+    assert "Rückfahrt" in text
     labels = [label for row in buttons for label, _ in row]
-    assert "🚆 سأعود بالقطار" in labels
+    assert "🚆 Ich fahre mit dem Zug zurück" in labels
 
 
 def test_render_manager_escalation_mentions_attempts():

@@ -24,8 +24,8 @@ def test_render_report_contains_all_metrics():
     text = render_report(make_kpis())
     assert "62%" in text
     assert "41%" in text
-    assert "6.30 كم" in text
-    assert "1.35 €/كم" in text
+    assert "6.30 km" in text
+    assert "1.35 €/km" in text
     assert "88.50 €" in text
 
 

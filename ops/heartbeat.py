@@ -27,7 +27,7 @@ async def check_once() -> None:
             continue
         await publish(
             "alert.manager",
-            {"source": "heartbeat", "message": f"لا نبضة من {component} منذ {last_beat} — تحقق من الخدمة"},
+            {"source": "heartbeat", "message": f"Kein Herzschlag von {component} seit {last_beat} — Dienst überprüfen"},
         )
         _already_alerted.add(component)
         log.warning("component missed heartbeat", extra={"extra_fields": {"component": component}})

@@ -23,6 +23,23 @@ def test_parse_card_text_basic_ride():
     assert offer.pickup_date.minute == 48
     assert offer.platform == "movacarpro"
     assert offer.required_license is None
+    assert offer.url is None  # no href given
+
+
+def test_parse_card_text_resolves_relative_href_against_root():
+    parser = make_parser()
+    text = "Bronze 56,00 € Weiden → Saal a. d. Donau Fr 25.09.2026 12:48 → Di 29.09.2026 16:00"
+    offer = parser._parse_card_text(text, href="/fahrten/12345")
+    assert offer is not None
+    assert offer.url == "https://movacarpro.com/fahrten/12345"
+
+
+def test_parse_card_text_keeps_absolute_href_as_is():
+    parser = make_parser()
+    text = "Bronze 56,00 € Weiden → Saal a. d. Donau Fr 25.09.2026 12:48 → Di 29.09.2026 16:00"
+    offer = parser._parse_card_text(text, href="https://movacarpro.com/fahrten/999")
+    assert offer is not None
+    assert offer.url == "https://movacarpro.com/fahrten/999"
 
 
 def test_parse_card_text_without_tier_badge():

@@ -37,6 +37,11 @@ services:
       context: .
       dockerfile: collector/Dockerfile
     env_file: .env
+    environment:
+      # active_hours in config.yaml means the fleet's local working hours,
+      # not UTC — without this, datetime.now() in the container defaults to
+      # UTC and the window is off by 1-2 hours depending on DST.
+      TZ: Europe/Berlin
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - collector_state:/data
@@ -118,6 +123,10 @@ services:
       context: .
       dockerfile: ops/Dockerfile
     env_file: .env
+    environment:
+      # The weekly report fires Monday 08:00 local time (ops/weekly_report.py) —
+      # same UTC-vs-local reasoning as the collector's active_hours.
+      TZ: Europe/Berlin
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     depends_on:

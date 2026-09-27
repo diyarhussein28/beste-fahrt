@@ -20,6 +20,7 @@ import logging
 import re
 from datetime import datetime
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 from shared.config import get_platform_credentials
 from shared.models import RawOffer
@@ -81,7 +82,20 @@ _CARD_EXTRACTION_JS = r"""
     if (!card || seen.has(card)) continue;
     seen.add(card);
     const opacity = parseFloat(getComputedStyle(card).opacity || '1');
-    cards.push([card.textContent.replace(/\s+/g, ' ').trim(), opacity < 0.99]);
+
+    // A driver needs a direct link to the ride to actually book it — check
+    // whether the card sits inside a link (Angular routerLink renders a
+    // real href), or contains one, before falling back to none.
+    let href = null;
+    const wrappingLink = card.closest('a[href]');
+    if (wrappingLink) {
+      href = wrappingLink.getAttribute('href');
+    } else {
+      const innerLink = card.querySelector('a[href]');
+      if (innerLink) href = innerLink.getAttribute('href');
+    }
+
+    cards.push([card.textContent.replace(/\s+/g, ' ').trim(), opacity < 0.99, href]);
   }
   return cards;
 }
@@ -173,16 +187,24 @@ class MovacarProParser(OfferParser):
 
         raw_cards = await page.evaluate(_CARD_EXTRACTION_JS)
         offers: list[RawOffer] = []
-        for text, locked in raw_cards:
-            log.debug("movacarpro card text", extra={"extra_fields": {"locked": locked, "text": text[:400]}})
+        for text, locked, href in raw_cards:
+            log.debug("movacarpro card text", extra={"extra_fields": {"locked": locked, "text": text[:400], "href": href}})
             if locked:
                 continue  # e.g. a Silber/Gold ride this account's tier can't book
-            offer = self._parse_card_text(text)
+            offer = self._parse_card_text(text, href)
             if offer is not None:
                 offers.append(offer)
         return offers
 
-    def _parse_card_text(self, text: str) -> RawOffer | None:
+    @staticmethod
+    def _resolve_url(href: str | None) -> str | None:
+        if not href:
+            return None
+        if href.startswith("http://") or href.startswith("https://"):
+            return href
+        return urljoin(ROOT_URL, href)
+
+    def _parse_card_text(self, text: str, href: str | None = None) -> RawOffer | None:
         price_match = _PRICE_RE.search(text)
         if not price_match:
             return None
@@ -221,6 +243,7 @@ class MovacarProParser(OfferParser):
             pickup_date=pickup_date,
             price_eur=price_eur,
             required_license=required_license,
+            url=self._resolve_url(href),
         )
 
     @staticmethod

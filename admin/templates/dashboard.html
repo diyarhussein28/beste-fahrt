@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Fleet Dispatch Monitor — لوحة الإدارة</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; margin: 0; padding: 24px; background: #0f172a; color: #e2e8f0; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .card { background: #1e293b; border-radius: 10px; padding: 14px 16px; }
+  .card .label { color: #94a3b8; font-size: 0.8rem; }
+  .card .value { font-size: 1.4rem; font-weight: 600; margin-top: 4px; }
+  section { margin-bottom: 32px; }
+  h2 { font-size: 1.1rem; border-bottom: 1px solid #334155; padding-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid #1e293b; }
+  th { color: #94a3b8; font-weight: 500; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
+  .badge.available { background: #14532d; color: #86efac; }
+  .badge.on_job { background: #713f12; color: #fde68a; }
+  .badge.off_duty { background: #334155; color: #94a3b8; }
+  .badge.open { background: #1e3a8a; color: #93c5fd; }
+  .badge.dispatched { background: #713f12; color: #fde68a; }
+  .badge.accept { background: #14532d; color: #86efac; }
+  .badge.decline { background: #7f1d1d; color: #fca5a5; }
+  footer { color: #475569; font-size: 0.8rem; margin-top: 40px; }
+</style>
+</head>
+<body>
+  <h1>🚚 Fleet Dispatch Monitor</h1>
+  <div class="subtitle">لوحة قراءة فقط — لا حجز ولا تعديل من هنا</div>
+
+  <section>
+    <h2>مؤشرات آخر {{ kpis.window_days }} أيام</h2>
+    <div class="grid">
+      <div class="card"><div class="label">نسبة القبول</div><div class="value">{{ "%.0f"|format(kpis.acceptance_rate * 100) if kpis.acceptance_rate is not none else "—" }}%</div></div>
+      <div class="card"><div class="label">نسبة العودة المدفوعة</div><div class="value">{{ "%.0f"|format(kpis.return_rate * 100) if kpis.return_rate is not none else "—" }}%</div></div>
+      <div class="card"><div class="label">متوسط الكم الفارغ</div><div class="value">{{ "%.1f"|format(kpis.avg_deadhead_km) if kpis.avg_deadhead_km is not none else "—" }} كم</div></div>
+      <div class="card"><div class="label">الإيراد لكل كم</div><div class="value">{{ "%.2f"|format(kpis.avg_eur_per_km) if kpis.avg_eur_per_km is not none else "—" }} €</div></div>
+      <div class="card"><div class="label">ربحية الجولة</div><div class="value">{{ "%.2f"|format(kpis.round_trip_eur_per_km) if kpis.round_trip_eur_per_km is not none else "—" }} €/كم</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>السائقون ({{ drivers|length }})</h2>
+    <table>
+      <thead><tr><th>الاسم</th><th>الحالة</th><th>رحلات اليوم</th><th>المدينة الأساس</th><th>موافقة الموقع</th></tr></thead>
+      <tbody>
+        {% for d in drivers %}
+        <tr>
+          <td>{{ d.name }}</td>
+          <td><span class="badge {{ d.status.value }}">{{ d.status.value }}</span></td>
+          <td>{{ d.jobs_today }}</td>
+          <td>{{ d.home_city or "—" }}</td>
+          <td>{{ "نعم" if d.location_consent else "لا" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>العروض المفتوحة/الموجّهة ({{ jobs|length }})</h2>
+    <table>
+      <thead><tr><th>الاستلام</th><th>التسليم</th><th>السعر</th><th>المسافة</th><th>الحالة</th><th>اكتُشف</th></tr></thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.pickup_addr }}</td>
+          <td>{{ j.dropoff_addr }}</td>
+          <td>{{ "%.2f"|format(j.price_eur) if j.price_eur is not none else "—" }} €</td>
+          <td>{{ "%.1f"|format(j.route_km) if j.route_km is not none else "—" }} كم</td>
+          <td><span class="badge {{ j.status.value }}">{{ j.status.value }}</span></td>
+          <td>{{ j.first_seen.strftime("%d.%m %H:%M") if j.first_seen else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>آخر التنبيهات ({{ dispatches|length }})</h2>
+    <table>
+      <thead><tr><th>السائق</th><th>العرض</th><th>الترتيب</th><th>الرد</th><th>وقت الإرسال</th></tr></thead>
+      <tbody>
+        {% for d in dispatches %}
+        <tr>
+          <td>{{ d.driver_name }}</td>
+          <td>{{ d.pickup_addr }} → {{ d.dropoff_addr }}</td>
+          <td>{{ d.rank }}</td>
+          <td>{% if d.response %}<span class="badge {{ d.response }}">{{ d.response }}</span>{% else %}—{% endif %}</td>
+          <td>{{ d.sent_at.strftime("%d.%m %H:%M") if d.sent_at else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <footer>Fleet Dispatch Monitor — Read-Only Bot. تحديث الصفحة يدوياً لعرض أحدث البيانات.</footer>
+</body>
+</html>

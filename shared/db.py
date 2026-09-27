@@ -277,16 +277,16 @@ async def ranked_drivers_for_job(job_fp: str, limit: int = 5) -> list[RankedDriv
     ]
 
 
-async def log_dispatch(job_fp: str, driver_id: int, rank: int) -> None:
+async def log_dispatch(job_fp: str, driver_id: int, rank: int, approach_km: float | None = None) -> None:
     async with get_engine().begin() as conn:
         await conn.execute(
             text(
                 """
-                INSERT INTO dispatches (job_fp, driver_id, rank, sent_at)
-                VALUES (:job_fp, :driver_id, :rank, now())
+                INSERT INTO dispatches (job_fp, driver_id, rank, sent_at, approach_km)
+                VALUES (:job_fp, :driver_id, :rank, now(), :approach_km)
                 """
             ),
-            {"job_fp": job_fp, "driver_id": driver_id, "rank": rank},
+            {"job_fp": job_fp, "driver_id": driver_id, "rank": rank, "approach_km": approach_km},
         )
 
 
@@ -332,6 +332,92 @@ async def stale_heartbeats(max_age_seconds: int) -> list[tuple[str, "datetime"]]
             )
         ).all()
         return [(r.component, r.last_beat) for r in rows]
+
+
+async def list_drivers() -> list[Driver]:
+    async with get_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT id, name, telegram_chat_id, phone, status, active,
+                           location_consent, license_classes, jobs_today, allow_overnight,
+                           ST_Y(home_geom::geometry) AS home_lat, ST_X(home_geom::geometry) AS home_lon,
+                           home_city
+                    FROM drivers ORDER BY name
+                    """
+                )
+            )
+        ).mappings().all()
+        return [
+            Driver(
+                id=r["id"],
+                name=r["name"],
+                telegram_chat_id=r["telegram_chat_id"],
+                phone=r["phone"],
+                status=DriverStatus(r["status"]),
+                active=r["active"],
+                location_consent=r["location_consent"],
+                license_classes=list(r["license_classes"] or []),
+                jobs_today=r["jobs_today"],
+                home_lat=r["home_lat"],
+                home_lon=r["home_lon"],
+                home_city=r["home_city"],
+                allow_overnight=r["allow_overnight"],
+            )
+            for r in rows
+        ]
+
+
+async def list_open_jobs(limit: int = 50) -> list[Job]:
+    async with get_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT fp, platform_id, pickup_addr, dropoff_addr,
+                           ST_Y(pickup_geom::geometry) AS pickup_lat, ST_X(pickup_geom::geometry) AS pickup_lon,
+                           ST_Y(dropoff_geom::geometry) AS dropoff_lat, ST_X(dropoff_geom::geometry) AS dropoff_lon,
+                           price_eur, route_km, pickup_date, url, status, first_seen, gone_at
+                    FROM jobs WHERE status IN ('open', 'dispatched')
+                    ORDER BY first_seen DESC LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+        ).mappings().all()
+        return [
+            Job(
+                fp=r["fp"], platform_id=r["platform_id"], pickup_addr=r["pickup_addr"], dropoff_addr=r["dropoff_addr"],
+                pickup_lat=r["pickup_lat"], pickup_lon=r["pickup_lon"],
+                dropoff_lat=r["dropoff_lat"], dropoff_lon=r["dropoff_lon"],
+                price_eur=float(r["price_eur"]) if r["price_eur"] is not None else None,
+                route_km=float(r["route_km"]) if r["route_km"] is not None else None,
+                pickup_date=r["pickup_date"], url=r["url"], status=JobStatus(r["status"]),
+                first_seen=r["first_seen"], gone_at=r["gone_at"],
+            )
+            for r in rows
+        ]
+
+
+async def list_recent_dispatches(limit: int = 50) -> list[dict]:
+    async with get_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT d.sent_at, d.rank, d.response, d.responded_at, d.approach_km,
+                           dr.name AS driver_name, j.fp AS job_fp, j.pickup_addr, j.dropoff_addr, j.price_eur
+                    FROM dispatches d
+                    JOIN drivers dr ON dr.id = d.driver_id
+                    JOIN jobs j ON j.fp = d.job_fp
+                    ORDER BY d.sent_at DESC LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
 
 
 async def active_service_areas() -> list[tuple[float, float, float]]:

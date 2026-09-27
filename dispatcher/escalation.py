@@ -64,7 +64,7 @@ async def dispatch_sequential(
         driver_id = candidate.driver.id
         assert driver_id is not None
         await send_to_driver(candidate, job, attempt)
-        await log_dispatch(job.fp, driver_id, rank=attempt)
+        await log_dispatch(job.fp, driver_id, rank=attempt, approach_km=candidate.approach_km)
 
         response = await _wait_for_response(job.fp, driver_id, config.response_timeout_seconds)
         if response == DispatchResponse.ACCEPT:
@@ -95,4 +95,4 @@ async def dispatch_broadcast(
         driver_id = candidate.driver.id
         assert driver_id is not None
         await send_to_driver(candidate, job, attempt)
-        await log_dispatch(job.fp, driver_id, rank=attempt)
+        await log_dispatch(job.fp, driver_id, rank=attempt, approach_km=candidate.approach_km)

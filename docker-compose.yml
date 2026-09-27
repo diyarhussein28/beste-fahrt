@@ -113,6 +113,22 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  ops:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   pgdata:
   collector_state:

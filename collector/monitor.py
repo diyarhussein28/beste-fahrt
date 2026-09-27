@@ -24,7 +24,7 @@ from shared.events import publish
 from shared.logging_config import configure_logging
 from shared.models import Job, JobStatus, RawOffer, job_fingerprint
 from shared import db as shared_db
-from collector import geo, platforms, session
+from collector import geo, humanize, platforms, session
 from collector.exceptions import LoginBlocked, PlatformChanged, RateLimited
 from collector.parser import OfferParser
 
@@ -145,7 +145,9 @@ async def platform_loop(browser, parser: OfferParser) -> None:
     empty_streak = 0
     heartbeat_name = f"collector:{parser.name}"
 
-    ctx = await browser.new_context(storage_state=session.load_state_dict(parser.name))
+    ctx = await browser.new_context(
+        storage_state=session.load_state_dict(parser.name), **humanize.BROWSER_CONTEXT_DEFAULTS
+    )
     page = await ctx.new_page()
 
     while True:
@@ -160,6 +162,7 @@ async def platform_loop(browser, parser: OfferParser) -> None:
                 await parser.login(page, ctx)
                 await session.save_state(ctx, parser.name)
 
+            await humanize.act_like_a_person(page)
             empty_streak = await process_cycle(parser, page, empty_streak)
             await shared_db.beat(heartbeat_name)
             backoff = float(cfg.polling.base_seconds)
@@ -189,8 +192,17 @@ async def platform_loop(browser, parser: OfferParser) -> None:
             log.exception("unexpected error in collector cycle", extra={"extra_fields": {"platform": parser.name}})
             backoff = min(backoff * 2, cfg.polling.max_backoff_seconds)
 
-        jitter = random.uniform(-cfg.polling.jitter_seconds, cfg.polling.jitter_seconds)
-        await asyncio.sleep(max(1.0, backoff + jitter))
+        if backoff <= cfg.polling.base_seconds:
+            # Normal cycle, nothing went wrong: vary the wait like a person
+            # actually checking a job board would, not a fixed clock tick.
+            sleep_s = humanize.human_delay_seconds(cfg.polling.base_seconds, cfg.polling.jitter_seconds)
+        else:
+            # Recovering from an error — plain jitter around the escalated
+            # backoff, since this is about being gentle with the platform
+            # after a problem, not about looking human.
+            jitter = random.uniform(-cfg.polling.jitter_seconds, cfg.polling.jitter_seconds)
+            sleep_s = max(1.0, backoff + jitter)
+        await asyncio.sleep(sleep_s)
 
 
 async def run() -> None:

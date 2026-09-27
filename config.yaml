@@ -28,6 +28,12 @@ platforms:
   #     price: "[data-testid=price]"
   #     offer_url: "[data-testid=offer-link]"
 
+# base_seconds/jitter_seconds set the *average* pace — the actual wait
+# between checks is drawn from collector/humanize.py's human_delay_seconds()
+# (see the checks running against real IPs: mostly quick rechecks around
+# base±jitter, occasionally a longer pause, rarely a real break), not a
+# flat clock tick. This is about not *looking* automated, same goal as
+# active_hours below — never a way to justify a shorter base interval.
 polling:
   base_seconds: 30
   jitter_seconds: 10

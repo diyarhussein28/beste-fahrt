@@ -1,0 +1,61 @@
+# Fleet Dispatch Monitor — إعدادات النظام
+# راجع القسم 4.3 (Polling) والقسم 6.3 (Scoring) والقسم 8 (Return Trip) في الوثيقة التقنية.
+
+platform:
+  offers_url: "https://platform.example/fleet/offers"
+  login_url: "https://platform.example/login"
+  selectors:
+    offer_card: "[data-testid=offer-card]"
+    offer_id: "[data-testid=offer-id]"
+    pickup_address: "[data-testid=pickup-address]"
+    dropoff_address: "[data-testid=dropoff-address]"
+    pickup_date: "[data-testid=pickup-date]"
+    price: "[data-testid=price]"
+    offer_url: "[data-testid=offer-link]"
+
+polling:
+  base_seconds: 30
+  jitter_seconds: 10
+  active_hours: "06:00-21:00"
+  max_backoff_seconds: 600
+  rate_limit_pause_seconds: 900
+
+service_area:
+  center: [51.0459, 7.0192] # Leverkusen
+  radius_km: 40
+
+matching:
+  weights:
+    dist: 1.0
+    stale: 0.5
+    load: 3.0
+    fit: 1.0
+  stale_after_minutes: 45
+  min_eur_per_km: 0.9
+  top_n_for_road_distance: 5
+
+dispatch:
+  channel: telegram
+  response_timeout_seconds: 45
+  max_attempts: 3
+  broadcast_if_eur_per_km_above: 1.8
+
+return_trip:
+  enabled: true
+  trigger_min_outbound_km: 100
+  pickup_radius_km: 30
+  home_radius_km: 20
+  min_progress: 0.3
+  min_buffer_minutes: 30
+  max_wait_hours: 3
+  watch_expires_after_hours: 4
+  max_chain_legs: 2
+  transit_cost_per_km: 0.15 # rough train estimate
+
+privacy:
+  location_retention_days: 30
+  show_full_address_in_alert: false
+
+ops:
+  heartbeat_interval_seconds: 60
+  heartbeat_missing_alert_after_seconds: 300

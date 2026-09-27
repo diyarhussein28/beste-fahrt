@@ -240,6 +240,7 @@ async def run() -> None:
     _APP.add_handler(CommandHandler("available", manager_commands.cmd_available))
     _APP.add_handler(CommandHandler("offline", manager_commands.cmd_offline))
     _APP.add_handler(CommandHandler("location", manager_commands.cmd_location))
+    _APP.add_handler(CommandHandler("home", manager_commands.cmd_home))
     _APP.add_handler(CommandHandler("drivers", manager_commands.cmd_drivers))
     _APP.add_handler(CommandHandler("add_driver", manager_commands.cmd_add_driver))
     _APP.add_handler(CommandHandler("remove_driver", manager_commands.cmd_remove_driver))

@@ -15,7 +15,6 @@ code and links their chat_id — no need to know their chat_id up front.
 from __future__ import annotations
 
 import logging
-import re
 import secrets as _pysecrets
 
 from telegram import Update
@@ -36,10 +35,9 @@ from shared.db import (
     set_driver_home,
     set_driver_shift_status,
 )
+from collector.geo import geocode
 
 log = logging.getLogger("dispatcher.manager_commands")
-
-_COORD_RE = re.compile(r"(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)")
 
 
 def _is_manager(update: Update) -> bool:
@@ -72,6 +70,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             f"Willkommen, {driver.name}! Dein Konto wurde erfolgreich verknüpft.\n\n"
             "Sobald du im Dienst bist, sende /available, damit dir Aufträge zugeschickt werden.\n"
+            "Setze deinen Heimatort mit /home <Ort> (nötig für Rückfahrten).\n"
             "Für Live-Standortfreigabe (verbessert die Zuordnung) sende /consent_on."
         )
         secrets = get_secrets()
@@ -131,6 +130,9 @@ async def cmd_offline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def cmd_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manuelle Standorteingabe — القسم 6.1's dritte, schwächste Quelle
     ('إدخال يدوي'), als Fallback wenn Live-Standort nicht geteilt wird.
+    Takes a plain place name (geocoded via Nominatim, same as an offer's
+    pickup/dropoff address), not raw coordinates — nobody driving a car
+    should need to go find their own lat/lon first.
     """
     chat_id = update.effective_chat.id if update.effective_chat else None
     if chat_id is None or update.message is None:
@@ -141,18 +143,47 @@ async def cmd_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Kein aktives Fahrerkonto gefunden — bitte zuerst über einen Einladungslink verknüpfen.")
         return
 
-    raw = " ".join(context.args)
-    match = _COORD_RE.search(raw)
-    if not match:
-        await update.message.reply_text(
-            "Verwendung: /location <lat>,<lon>\nBeispiel: /location 51.0459,7.0192\n"
-            "(Koordinaten z.B. über Google Maps: Ort lange gedrückt halten → Koordinaten kopieren)"
-        )
+    address = " ".join(context.args).strip()
+    if not address:
+        await update.message.reply_text("Verwendung: /location <Ort>\nBeispiel: /location Leverkusen-Opladen")
         return
 
-    lat, lon = float(match.group(1)), float(match.group(2))
+    result = await geocode(address)
+    if result is None:
+        await update.message.reply_text(f"Ort '{address}' konnte nicht gefunden werden — bitte genauer angeben (z.B. mit Stadt).")
+        return
+
+    lat, lon = result
     await record_driver_location(driver.id, lat, lon, source="manual")
-    await update.message.reply_text(f"✅ Standort aktualisiert: ({lat}, {lon})")
+    await update.message.reply_text(f"✅ Standort aktualisiert: {address}")
+
+
+async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fahrer setzt seinen eigenen Heimatort — nötig für die Rückfahrtsuche
+    (القسم 8). Nur der Fahrer selbst oder der Manager (/set_home) kann das.
+    """
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id is None or update.message is None:
+        return
+
+    driver = await get_driver_by_chat_id(chat_id)
+    if driver is None or not driver.active:
+        await update.message.reply_text("Kein aktives Fahrerkonto gefunden — bitte zuerst über einen Einladungslink verknüpfen.")
+        return
+
+    address = " ".join(context.args).strip()
+    if not address:
+        await update.message.reply_text("Verwendung: /home <Ort>\nBeispiel: /home Leverkusen")
+        return
+
+    result = await geocode(address)
+    if result is None:
+        await update.message.reply_text(f"Ort '{address}' konnte nicht gefunden werden — bitte genauer angeben (z.B. mit Stadt).")
+        return
+
+    lat, lon = result
+    await set_driver_home(driver.id, lat, lon, address)
+    await update.message.reply_text(f"✅ Heimatort gesetzt auf: {address}")
 
 
 async def cmd_drivers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -191,8 +222,9 @@ async def cmd_add_driver(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         f"✅ {name} wurde hinzugefügt.\n\n"
         f"Sende ihm diesen Link — ein Tap auf \"Start\" verknüpft sein Konto automatisch (7 Tage gültig):\n{link}\n\n"
-        f"Danach seinen Heimatort festlegen (nötig für die Rückfahrtsuche):\n"
-        f"/set_home {name} 51.0459,7.0192 Leverkusen"
+        f"Danach seinen Heimatort festlegen (nötig für die Rückfahrtsuche) — "
+        f"entweder du:\n/set_home {name}, <Ort>\n"
+        f"oder er selbst nach dem Verknüpfen mit:\n/home <Ort>"
     )
 
 
@@ -234,25 +266,38 @@ async def cmd_activate_driver(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def cmd_set_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Verwendung: /set_home <Name>, <Ort> — das Komma trennt Name und Ort,
+    da beide aus mehreren Wörtern bestehen können (z.B. "Ahmed K." und
+    "Bergisch Gladbach"). Der Ort wird wie eine Auftragsadresse geocodiert.
+    """
     if not _is_manager(update):
         return await _reject(update)
 
     raw = " ".join(context.args)
-    match = _COORD_RE.search(raw)
-    if not match:
+    if "," not in raw:
         await update.message.reply_text(
-            "Verwendung: /set_home <Name> <lat>,<lon> [Stadt]\n"
-            "Beispiel: /set_home Ahmed K. 51.0459,7.0192 Leverkusen"
+            "Verwendung: /set_home <Name>, <Ort>\nBeispiel: /set_home Ahmed K., Leverkusen"
         )
         return
 
-    name = raw[: match.start()].strip()
-    city = raw[match.end():].strip() or None
+    name, _, address = raw.partition(",")
+    name, address = name.strip(), address.strip()
+    if not name or not address:
+        await update.message.reply_text(
+            "Verwendung: /set_home <Name>, <Ort>\nBeispiel: /set_home Ahmed K., Leverkusen"
+        )
+        return
+
     driver = await find_driver_by_name(name)
     if driver is None:
         await update.message.reply_text(f"Kein Fahrer namens '{name}' gefunden. Siehe /drivers")
         return
 
-    lat, lon = float(match.group(1)), float(match.group(2))
-    await set_driver_home(driver.id, lat, lon, city)
-    await update.message.reply_text(f"✅ Heimatort von {name} gesetzt auf ({lat}, {lon}) {city or ''}".strip())
+    result = await geocode(address)
+    if result is None:
+        await update.message.reply_text(f"Ort '{address}' konnte nicht gefunden werden — bitte genauer angeben (z.B. mit Stadt).")
+        return
+
+    lat, lon = result
+    await set_driver_home(driver.id, lat, lon, address)
+    await update.message.reply_text(f"✅ Heimatort von {name} gesetzt auf: {address}")

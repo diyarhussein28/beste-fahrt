@@ -1,0 +1,67 @@
+"""Session persistence — القسم 4.2: تسجيل الدخول مرة واحدة، حفظ الجلسة
+مشفّرة على القرص، وإعادة تسجيل الدخول تلقائياً مرة واحدة فقط عند انتهائها.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from cryptography.fernet import Fernet, InvalidToken
+
+from shared.config import get_secrets
+
+if TYPE_CHECKING:
+    from playwright.async_api import BrowserContext
+
+log = logging.getLogger("collector.session")
+
+
+def _fernet() -> Fernet:
+    secrets = get_secrets()
+    key_material = secrets.state_enc_key or f"state-enc:{secrets.admin_secret_key}"
+    digest = hashlib.sha256(key_material.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def load_state_dict() -> dict | None:
+    """Returns the decrypted storage_state dict, or None if no session is saved yet."""
+    path = Path(get_secrets().state_file)
+    if not path.exists():
+        return None
+    try:
+        return decrypt_state(path.read_bytes())
+    except (InvalidToken, json.JSONDecodeError) as e:
+        log.warning("stored session state is unreadable, will re-login", extra={"extra_fields": {"error": str(e)}})
+        return None
+
+
+def encrypt_state(state: dict) -> bytes:
+    return _fernet().encrypt(json.dumps(state).encode("utf-8"))
+
+
+def decrypt_state(token: bytes) -> dict:
+    return json.loads(_fernet().decrypt(token))
+
+
+async def save_state(ctx: "BrowserContext") -> None:
+    path = Path(get_secrets().state_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = await ctx.storage_state()
+    token = encrypt_state(state)
+    path.write_bytes(token)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass  # best-effort on filesystems that don't support POSIX permissions
+    log.info("session state saved (encrypted)")
+
+
+def clear_state() -> None:
+    """Force a fresh login next cycle — used when we suspect the saved state leaked."""
+    path = Path(get_secrets().state_file)
+    if path.exists():
+        path.unlink()

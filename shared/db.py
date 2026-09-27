@@ -176,6 +176,36 @@ async def record_dispatch_response(job_fp: str, driver_id: int, response: str) -
         )
 
 
+async def beat(component: str) -> None:
+    """Heartbeat write — القسم 9.3: كل مكوّن يكتب نبضة كل دقيقة."""
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO heartbeats (component, last_beat) VALUES (:c, now())
+                ON CONFLICT (component) DO UPDATE SET last_beat = now()
+                """
+            ),
+            {"c": component},
+        )
+
+
+async def stale_heartbeats(max_age_seconds: int) -> list[tuple[str, "datetime"]]:
+    async with get_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT component, last_beat FROM heartbeats
+                    WHERE last_beat < now() - make_interval(secs => :max_age)
+                    """
+                ),
+                {"max_age": max_age_seconds},
+            )
+        ).all()
+        return [(r.component, r.last_beat) for r in rows]
+
+
 async def active_service_areas() -> list[tuple[float, float, float]]:
     """(center_lat, center_lon, radius_km) for the base area + open return watches."""
     async with get_engine().connect() as conn:

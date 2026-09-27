@@ -126,6 +126,7 @@ class Secrets(BaseSettings):
     platform_username: str = ""
     platform_password: str = ""
     state_file: str = "./data/storage_state.json"
+    state_enc_key: str = ""  # if unset, derived from admin_secret_key (see collector/session.py)
 
     telegram_bot_token: str = ""
     telegram_manager_chat_id: int = 0

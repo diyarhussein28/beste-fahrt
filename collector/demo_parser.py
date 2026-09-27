@@ -15,6 +15,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+from shared.config import PlatformEntry
 from shared.models import RawOffer
 from collector.parser import OfferParser
 
@@ -38,6 +39,7 @@ SPAWN_CHANCE = 0.5
 
 class DemoOfferParser(OfferParser):
     def __init__(self) -> None:
+        super().__init__(PlatformEntry(name="demo"))
         self._active: dict[str, tuple[RawOffer, int]] = {}
 
     async def is_logged_in(self, page: "Page") -> bool:
@@ -58,6 +60,7 @@ class DemoOfferParser(OfferParser):
         if len(self._active) < MAX_ACTIVE_OFFERS and random.random() < SPAWN_CHANCE:
             pickup, dropoff = random.sample(_CITIES, 2)
             offer = RawOffer(
+                platform="demo",
                 platform_id=f"demo-{random.randint(100000, 999999)}",
                 pickup_address=pickup[0],
                 dropoff_address=dropoff[0],

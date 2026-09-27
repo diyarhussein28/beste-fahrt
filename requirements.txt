@@ -1,5 +1,6 @@
 pydantic>=2.7
 pydantic-settings>=2.3
+python-dotenv>=1.0
 PyYAML>=6.0
 SQLAlchemy>=2.0
 greenlet>=3.0

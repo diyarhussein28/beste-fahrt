@@ -56,6 +56,7 @@ def test_active_hours_window_spanning_midnight(monkeypatch):
 
 def test_normalize_computes_route_km_when_both_geocoded():
     raw = RawOffer(
+        platform="demo",
         pickup_address="Leverkusen",
         dropoff_address="Köln",
         price_eur=65.0,
@@ -65,12 +66,19 @@ def test_normalize_computes_route_km_when_both_geocoded():
     assert job.route_km is not None
     assert 5 < job.route_km < 20
     assert job.pickup_lat == 51.0459
+    assert job.platform == "demo"
 
 
 def test_normalize_without_dropoff_geo_has_no_route_km():
-    raw = RawOffer(pickup_address="Leverkusen", dropoff_address="Unknown Place")
+    raw = RawOffer(platform="demo", pickup_address="Leverkusen", dropoff_address="Unknown Place")
     job = normalize(raw, pickup_geo=(51.0459, 7.0192), dropoff_geo=None)
     assert job.route_km is None
+
+
+def test_normalize_carries_required_license_through():
+    raw = RawOffer(platform="movacarpro", pickup_address="A", dropoff_address="B", required_license="anhaenger")
+    job = normalize(raw, pickup_geo=(51.0, 7.0), dropoff_geo=(51.0, 7.0))
+    assert job.required_license == "anhaenger"
 
 
 def test_session_state_encrypt_decrypt_roundtrip():

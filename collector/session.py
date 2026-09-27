@@ -1,5 +1,9 @@
 """Session persistence — القسم 4.2: تسجيل الدخول مرة واحدة، حفظ الجلسة
 مشفّرة على القرص، وإعادة تسجيل الدخول تلقائياً مرة واحدة فقط عند انتهائها.
+
+Each platform gets its own state file (derived from STATE_FILE by inserting
+the platform name) since multiple platforms now run concurrently with
+independent sessions — see collector/monitor.py's `platform_loop`.
 """
 from __future__ import annotations
 
@@ -27,15 +31,20 @@ def _fernet() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(digest))
 
 
-def load_state_dict() -> dict | None:
+def _state_path(platform: str) -> Path:
+    base = Path(get_secrets().state_file)
+    return base.with_name(f"{platform}_{base.name}")
+
+
+def load_state_dict(platform: str) -> dict | None:
     """Returns the decrypted storage_state dict, or None if no session is saved yet."""
-    path = Path(get_secrets().state_file)
+    path = _state_path(platform)
     if not path.exists():
         return None
     try:
         return decrypt_state(path.read_bytes())
     except (InvalidToken, json.JSONDecodeError) as e:
-        log.warning("stored session state is unreadable, will re-login", extra={"extra_fields": {"error": str(e)}})
+        log.warning("stored session state is unreadable, will re-login", extra={"extra_fields": {"platform": platform, "error": str(e)}})
         return None
 
 
@@ -47,8 +56,8 @@ def decrypt_state(token: bytes) -> dict:
     return json.loads(_fernet().decrypt(token))
 
 
-async def save_state(ctx: "BrowserContext") -> None:
-    path = Path(get_secrets().state_file)
+async def save_state(ctx: "BrowserContext", platform: str) -> None:
+    path = _state_path(platform)
     path.parent.mkdir(parents=True, exist_ok=True)
     state = await ctx.storage_state()
     token = encrypt_state(state)
@@ -57,11 +66,11 @@ async def save_state(ctx: "BrowserContext") -> None:
         path.chmod(0o600)
     except OSError:
         pass  # best-effort on filesystems that don't support POSIX permissions
-    log.info("session state saved (encrypted)")
+    log.info("session state saved (encrypted)", extra={"extra_fields": {"platform": platform}})
 
 
-def clear_state() -> None:
+def clear_state(platform: str) -> None:
     """Force a fresh login next cycle — used when we suspect the saved state leaked."""
-    path = Path(get_secrets().state_file)
+    path = _state_path(platform)
     if path.exists():
         path.unlink()

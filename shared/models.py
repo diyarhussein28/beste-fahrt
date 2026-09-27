@@ -79,20 +79,27 @@ class DriverLocation(BaseModel):
 
 
 class RawOffer(BaseModel):
-    """What the platform-specific parser produces, before normalization."""
+    """What the platform-specific parser produces, before normalization.
+    `platform` is the source's registry name (e.g. "movacarpro", "demo") —
+    required so multiple platforms can be polled at once without their
+    fingerprints or job records colliding.
+    """
 
+    platform: str
     platform_id: str | None = None
     pickup_address: str
     dropoff_address: str
     pickup_date: datetime | None = None
     price_eur: float | None = None
     url: str | None = None
+    required_license: str | None = None  # e.g. a special-plate/trailer requirement tag
 
 
 class Job(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     fp: str
+    platform: str = ""
     platform_id: str | None = None
     pickup_addr: str
     dropoff_addr: str
@@ -119,13 +126,16 @@ class Job(BaseModel):
 def job_fingerprint(raw: RawOffer) -> str:
     """Stable id for dedup — see القسم 4.4.
 
-    Uses the platform's own id when available, otherwise a SHA-256 hash of
-    the fields that identify an offer regardless of cosmetic re-renders.
+    Namespaced by platform so two different platforms can't collide even if
+    they happen to reuse the same numbering scheme for their own ids. Uses
+    the platform's own id when available, otherwise a SHA-256 hash of the
+    fields that identify an offer regardless of cosmetic re-renders.
     """
     if raw.platform_id:
-        return raw.platform_id
+        return f"{raw.platform}:{raw.platform_id}"
     key = "|".join(
         [
+            raw.platform,
             raw.pickup_address.strip().lower(),
             raw.dropoff_address.strip().lower(),
             raw.pickup_date.isoformat() if raw.pickup_date else "",

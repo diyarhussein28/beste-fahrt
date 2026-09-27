@@ -1,9 +1,12 @@
 """Collector polling loop — القسم 4.6.
 
-Read-only: never books, accepts, or declines anything on the platform. Each
-cycle fetches the current offer list, geocodes and filters by service area,
-deduplicates by fingerprint, and publishes a `job.created` event per new
-offer for the Matching Engine to pick up.
+Read-only: never books, accepts, or declines anything on any platform. Each
+platform configured in config.yaml's `platforms` list runs its own
+concurrent loop (own browser context, session, login state, backoff) inside
+one shared Playwright browser process; each cycle fetches that platform's
+offer list, geocodes and filters by service area, deduplicates by
+fingerprint, and publishes a `job.created` event per new offer for the
+Matching Engine to pick up.
 """
 from __future__ import annotations
 
@@ -11,17 +14,17 @@ import asyncio
 import logging
 import os
 import random
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 
 from playwright.async_api import async_playwright
 
-from shared.config import get_config, get_secrets
+from shared.config import get_config
 from shared.db import mark_jobs_gone, upsert_job
 from shared.events import publish
 from shared.logging_config import configure_logging
 from shared.models import Job, JobStatus, RawOffer, job_fingerprint
 from shared import db as shared_db
-from collector import geo, session
+from collector import geo, platforms, session
 from collector.exceptions import LoginBlocked, PlatformChanged, RateLimited
 from collector.parser import OfferParser
 
@@ -30,16 +33,27 @@ log = logging.getLogger("collector")
 EMPTY_RESULT_ALERT_THRESHOLD = 20  # consecutive empty polls before suspecting a markup change
 
 
-def build_parser() -> OfferParser:
+def build_parsers() -> list[OfferParser]:
     mode = os.environ.get("COLLECTOR_MODE", "demo").lower()
-    if mode == "live":
-        from collector.example_parser import ConfigDrivenParser
+    if mode != "live":
+        from collector.demo_parser import DemoOfferParser
 
-        return ConfigDrivenParser()
-    from collector.demo_parser import DemoOfferParser
+        log.warning("COLLECTOR_MODE=demo — generating synthetic offers, not touching any real platform")
+        return [DemoOfferParser()]
 
-    log.warning("COLLECTOR_MODE=demo — generating synthetic offers, not touching any real platform")
-    return DemoOfferParser()
+    parsers: list[OfferParser] = []
+    for entry in get_config().platforms:
+        if not entry.enabled:
+            continue
+        parser = platforms.build_parser(entry)
+        if parser is None:
+            log.error("no parser registered for platform", extra={"extra_fields": {"platform": entry.name, "key": entry.parser_key()}})
+            continue
+        parsers.append(parser)
+
+    if not parsers:
+        log.warning("no enabled platforms configured under COLLECTOR_MODE=live — nothing to poll")
+    return parsers
 
 
 def _within_active_hours(cfg_polling) -> bool:
@@ -59,9 +73,10 @@ def _seconds_until_active(cfg_polling) -> float:
     return (target - now).total_seconds()
 
 
-async def alert_manager(message: str) -> None:
-    log.warning("manager alert", extra={"extra_fields": {"message": message}})
-    await publish("alert.manager", {"source": "collector", "message": message})
+async def alert_manager(message: str, platform: str | None = None) -> None:
+    log.warning("manager alert", extra={"extra_fields": {"message": message, "platform": platform}})
+    text = f"[{platform}] {message}" if platform else message
+    await publish("alert.manager", {"source": "collector", "message": text})
 
 
 def normalize(raw: RawOffer, pickup_geo: tuple[float, float] | None, dropoff_geo: tuple[float, float] | None) -> Job:
@@ -73,6 +88,7 @@ def normalize(raw: RawOffer, pickup_geo: tuple[float, float] | None, dropoff_geo
 
     return Job(
         fp=job_fingerprint(raw),
+        platform=raw.platform,
         platform_id=raw.platform_id,
         pickup_addr=raw.pickup_address,
         dropoff_addr=raw.dropoff_address,
@@ -85,6 +101,7 @@ def normalize(raw: RawOffer, pickup_geo: tuple[float, float] | None, dropoff_geo
         pickup_date=raw.pickup_date,
         url=raw.url,
         status=JobStatus.OPEN,
+        required_license=raw.required_license,
     )
 
 
@@ -107,65 +124,72 @@ async def process_cycle(parser: OfferParser, page, empty_streak: int) -> int:
             continue
         await upsert_job(job)
         await publish("job.created", {"fp": job.fp})
-        log.info("new job discovered", extra={"extra_fields": {"fp": job.fp, "pickup": job.pickup_addr}})
+        log.info("new job discovered", extra={"extra_fields": {"fp": job.fp, "platform": parser.name, "pickup": job.pickup_addr}})
 
-    gone = await mark_jobs_gone(seen_fps, since=datetime.now(timezone.utc))
+    gone = await mark_jobs_gone(seen_fps, since=datetime.now(timezone.utc), platform=parser.name)
     if gone:
-        log.info("jobs marked gone", extra={"extra_fields": {"count": gone}})
+        log.info("jobs marked gone", extra={"extra_fields": {"platform": parser.name, "count": gone}})
 
     empty_streak = empty_streak + 1 if not raw_offers else 0
     if empty_streak == EMPTY_RESULT_ALERT_THRESHOLD:
         await alert_manager(
-            f"Keine Angebote in den letzten {empty_streak} Durchläufen gefunden — möglicherweise hat sich das Plattform-Design geändert"
+            f"Keine Angebote in den letzten {empty_streak} Durchläufen gefunden — möglicherweise hat sich das Plattform-Design geändert",
+            platform=parser.name,
         )
     return empty_streak
 
 
-async def run() -> None:
-    configure_logging()
+async def platform_loop(browser, parser: OfferParser) -> None:
     cfg = get_config()
-    secrets = get_secrets()
-    parser = build_parser()
-
     backoff = float(cfg.polling.base_seconds)
     empty_streak = 0
+    heartbeat_name = f"collector:{parser.name}"
+
+    ctx = await browser.new_context(storage_state=session.load_state_dict(parser.name))
+    page = await ctx.new_page()
+
+    while True:
+        try:
+            if not _within_active_hours(cfg.polling):
+                wait_s = _seconds_until_active(cfg.polling)
+                log.info("outside active hours, sleeping", extra={"extra_fields": {"platform": parser.name, "seconds": wait_s}})
+                await asyncio.sleep(min(wait_s, 3600))
+                continue
+
+            if not await parser.is_logged_in(page):
+                await parser.login(page, ctx)
+                await session.save_state(ctx, parser.name)
+
+            empty_streak = await process_cycle(parser, page, empty_streak)
+            await shared_db.beat(heartbeat_name)
+            backoff = float(cfg.polling.base_seconds)
+
+        except LoginBlocked as e:
+            await alert_manager(f"Anmeldung gestoppt: {e} — wartet auf manuelles Eingreifen", platform=parser.name)
+            await asyncio.sleep(cfg.polling.max_backoff_seconds)
+        except RateLimited:
+            await alert_manager("Von der Plattform ratenbegrenzt — vorübergehend pausiert", platform=parser.name)
+            await asyncio.sleep(cfg.polling.rate_limit_pause_seconds)
+        except PlatformChanged as e:
+            await alert_manager(f"Mögliche Änderung im Plattform-Design: {e}", platform=parser.name)
+            backoff = min(backoff * 2, cfg.polling.max_backoff_seconds)
+        except Exception:
+            log.exception("unexpected error in collector cycle", extra={"extra_fields": {"platform": parser.name}})
+            backoff = min(backoff * 2, cfg.polling.max_backoff_seconds)
+
+        jitter = random.uniform(-cfg.polling.jitter_seconds, cfg.polling.jitter_seconds)
+        await asyncio.sleep(max(1.0, backoff + jitter))
+
+
+async def run() -> None:
+    configure_logging()
+    parsers = build_parsers()
+    if not parsers:
+        raise RuntimeError("no platforms to poll — check config.yaml's `platforms` list and COLLECTOR_MODE")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        ctx = await browser.new_context(storage_state=session.load_state_dict())
-        page = await ctx.new_page()
-
-        while True:
-            try:
-                if not _within_active_hours(cfg.polling):
-                    wait_s = _seconds_until_active(cfg.polling)
-                    log.info("outside active hours, sleeping", extra={"extra_fields": {"seconds": wait_s}})
-                    await asyncio.sleep(min(wait_s, 3600))
-                    continue
-
-                if not await parser.is_logged_in(page):
-                    await parser.login(page, ctx)
-                    await session.save_state(ctx)
-
-                empty_streak = await process_cycle(parser, page, empty_streak)
-                await shared_db.beat("collector")
-                backoff = float(cfg.polling.base_seconds)
-
-            except LoginBlocked as e:
-                await alert_manager(f"Anmeldung gestoppt: {e} — wartet auf manuelles Eingreifen")
-                await asyncio.sleep(cfg.polling.max_backoff_seconds)
-            except RateLimited:
-                await alert_manager("Von der Plattform ratenbegrenzt — vorübergehend pausiert")
-                await asyncio.sleep(cfg.polling.rate_limit_pause_seconds)
-            except PlatformChanged as e:
-                await alert_manager(f"Mögliche Änderung im Plattform-Design: {e}")
-                backoff = min(backoff * 2, cfg.polling.max_backoff_seconds)
-            except Exception:
-                log.exception("unexpected error in collector cycle")
-                backoff = min(backoff * 2, cfg.polling.max_backoff_seconds)
-
-            jitter = random.uniform(-cfg.polling.jitter_seconds, cfg.polling.jitter_seconds)
-            await asyncio.sleep(max(1.0, backoff + jitter))
+        await asyncio.gather(*(platform_loop(browser, parser) for parser in parsers))
 
 
 if __name__ == "__main__":

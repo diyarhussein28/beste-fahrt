@@ -11,8 +11,16 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Populates os.environ from .env for get_platform_credentials() below, which
+# reads dynamically-named PLATFORM_<NAME>_* vars directly rather than through
+# a pydantic-settings field (the set of platforms isn't known at class
+# definition time). Inside Docker, `env_file: .env` already does this at the
+# process level, so this is a no-op there; it matters for local/dev runs.
+load_dotenv()
 
 
 class Selectors(BaseModel):
@@ -25,10 +33,22 @@ class Selectors(BaseModel):
     offer_url: str = ""
 
 
-class PlatformConfig(BaseModel):
-    offers_url: str
+class PlatformEntry(BaseModel):
+    """One configured source platform. `parser` is the collector.platforms
+    registry key (defaults to `name` when the two match, e.g. "movacarpro");
+    `selectors` is only used by the generic config-driven parser — a
+    platform-specific parser class (like MovacarProParser) ignores it.
+    """
+
+    name: str
+    parser: str = ""
+    enabled: bool = True
     login_url: str = ""
-    selectors: Selectors
+    offers_url: str = ""
+    selectors: Selectors | None = None
+
+    def parser_key(self) -> str:
+        return self.parser or self.name
 
 
 class PollingConfig(BaseModel):
@@ -103,7 +123,7 @@ class OpsConfig(BaseModel):
 class AppConfig(BaseModel):
     """Business-logic settings, loaded from config.yaml."""
 
-    platform: PlatformConfig
+    platforms: list[PlatformEntry] = Field(default_factory=list)
     polling: PollingConfig = Field(default_factory=PollingConfig)
     service_area: ServiceAreaConfig
     matching: MatchingConfig = Field(default_factory=MatchingConfig)
@@ -127,8 +147,6 @@ class Secrets(BaseSettings):
     database_url: str = "postgresql+asyncpg://fleet:fleet@localhost:5432/fleet_dispatch"
     redis_url: str = "redis://localhost:6379/0"
 
-    platform_username: str = ""
-    platform_password: str = ""
     state_file: str = "./data/storage_state.json"
     state_enc_key: str = ""  # if unset, derived from admin_secret_key (see collector/session.py)
 
@@ -153,6 +171,16 @@ class Secrets(BaseSettings):
 @lru_cache
 def get_secrets() -> Secrets:
     return Secrets()
+
+
+def get_platform_credentials(platform_name: str) -> tuple[str, str]:
+    """Reads PLATFORM_<NAME>_USERNAME / PLATFORM_<NAME>_PASSWORD from the
+    environment for a given entry in config.yaml's `platforms` list — a
+    plain pydantic field per platform doesn't work since the set of
+    platforms is dynamic/user-configured, not fixed at code-writing time.
+    """
+    key = "".join(c if c.isalnum() else "_" for c in platform_name.upper())
+    return os.environ.get(f"PLATFORM_{key}_USERNAME", ""), os.environ.get(f"PLATFORM_{key}_PASSWORD", "")
 
 
 @lru_cache

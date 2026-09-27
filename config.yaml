@@ -1,17 +1,32 @@
 # Fleet Dispatch Monitor — إعدادات النظام
 # راجع القسم 4.3 (Polling) والقسم 6.3 (Scoring) والقسم 8 (Return Trip) في الوثيقة التقنية.
 
-platform:
-  offers_url: "https://platform.example/fleet/offers"
-  login_url: "https://platform.example/login"
-  selectors:
-    offer_card: "[data-testid=offer-card]"
-    offer_id: "[data-testid=offer-id]"
-    pickup_address: "[data-testid=pickup-address]"
-    dropoff_address: "[data-testid=dropoff-address]"
-    pickup_date: "[data-testid=pickup-date]"
-    price: "[data-testid=price]"
-    offer_url: "[data-testid=offer-link]"
+# كل منصة لها قسم مستقل هنا — البوت يراقبهم كلهم بنفس الوقت، كل واحدة
+# بجلسة تسجيل دخول وحالة استعلام مستقلة. بيانات الدخول تُقرأ من .env باسم
+# PLATFORM_<NAME بأحرف كبيرة>_USERNAME / _PASSWORD (مثال: PLATFORM_MOVACARPRO_USERNAME).
+platforms:
+  - name: movacarpro
+    parser: movacarpro # مطابق لـ collector/platforms.py
+    enabled: true
+    login_url: "https://movacarpro.com/login"
+    # offers_url متروك فارغاً عمداً — الـ parser ينتقل لصفحة "Alle Fahrten"
+    # عبر نص الرابط بدل مسار ثابت.
+
+  # مثال لمنصة إضافية باستخدام الـ parser العام (config.yaml selectors فقط،
+  # بدون كتابة كود جديد) — فعّلها وعدّل القيم لمنصتك التالية:
+  # - name: another_platform
+  #   parser: generic
+  #   enabled: false
+  #   login_url: "https://platform.example/login"
+  #   offers_url: "https://platform.example/fleet/offers"
+  #   selectors:
+  #     offer_card: "[data-testid=offer-card]"
+  #     offer_id: "[data-testid=offer-id]"
+  #     pickup_address: "[data-testid=pickup-address]"
+  #     dropoff_address: "[data-testid=dropoff-address]"
+  #     pickup_date: "[data-testid=pickup-date]"
+  #     price: "[data-testid=price]"
+  #     offer_url: "[data-testid=offer-link]"
 
 polling:
   base_seconds: 30

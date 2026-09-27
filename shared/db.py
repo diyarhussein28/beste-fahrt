@@ -35,13 +35,13 @@ async def upsert_job(job: Job) -> None:
         await conn.execute(
             text(
                 """
-                INSERT INTO jobs (fp, platform_id, pickup_addr, dropoff_addr,
+                INSERT INTO jobs (fp, platform, platform_id, pickup_addr, dropoff_addr,
                                    pickup_geom, dropoff_geom, price_eur, route_km,
-                                   pickup_date, url, status, first_seen)
-                VALUES (:fp, :platform_id, :pickup_addr, :dropoff_addr,
+                                   pickup_date, url, status, first_seen, required_license)
+                VALUES (:fp, :platform, :platform_id, :pickup_addr, :dropoff_addr,
                         ST_SetSRID(ST_MakePoint(:pickup_lon, :pickup_lat), 4326),
                         ST_SetSRID(ST_MakePoint(:dropoff_lon, :dropoff_lat), 4326),
-                        :price_eur, :route_km, :pickup_date, :url, :status, :first_seen)
+                        :price_eur, :route_km, :pickup_date, :url, :status, :first_seen, :required_license)
                 ON CONFLICT (fp) DO UPDATE SET
                     status = EXCLUDED.status,
                     price_eur = EXCLUDED.price_eur,
@@ -50,6 +50,7 @@ async def upsert_job(job: Job) -> None:
             ),
             {
                 "fp": job.fp,
+                "platform": job.platform,
                 "platform_id": job.platform_id,
                 "pickup_addr": job.pickup_addr,
                 "dropoff_addr": job.dropoff_addr,
@@ -63,22 +64,27 @@ async def upsert_job(job: Job) -> None:
                 "url": job.url,
                 "status": job.status.value,
                 "first_seen": job.first_seen,
+                "required_license": job.required_license,
             },
         )
 
 
-async def mark_jobs_gone(seen_fps: set[str], since: datetime) -> int:
-    """Flip any open job not seen in the latest poll to 'gone' — القسم 4.4."""
+async def mark_jobs_gone(seen_fps: set[str], since: datetime, platform: str) -> int:
+    """Flip any open job from `platform` not seen in its latest poll to
+    'gone' — القسم 4.4. Scoped to one platform: without this, platform A's
+    poll cycle would mark platform B's still-open jobs as gone simply
+    because they never appear in platform A's `seen_fps`.
+    """
     async with get_engine().begin() as conn:
         result = await conn.execute(
             text(
                 """
                 UPDATE jobs SET status = 'gone', gone_at = now()
-                WHERE status = 'open' AND first_seen < :since
+                WHERE status = 'open' AND platform = :platform AND first_seen < :since
                   AND NOT (fp = ANY(:seen_fps))
                 """
             ),
-            {"since": since, "seen_fps": list(seen_fps)},
+            {"since": since, "seen_fps": list(seen_fps), "platform": platform},
         )
         return result.rowcount or 0
 
@@ -110,10 +116,10 @@ async def get_job(fp: str) -> Job | None:
             await conn.execute(
                 text(
                     """
-                    SELECT fp, platform_id, pickup_addr, dropoff_addr,
+                    SELECT fp, platform, platform_id, pickup_addr, dropoff_addr,
                            ST_Y(pickup_geom::geometry) AS pickup_lat, ST_X(pickup_geom::geometry) AS pickup_lon,
                            ST_Y(dropoff_geom::geometry) AS dropoff_lat, ST_X(dropoff_geom::geometry) AS dropoff_lon,
-                           price_eur, route_km, pickup_date, url, status, first_seen, gone_at
+                           price_eur, route_km, pickup_date, url, status, first_seen, gone_at, required_license
                     FROM jobs WHERE fp = :fp
                     """
                 ),
@@ -124,6 +130,7 @@ async def get_job(fp: str) -> Job | None:
             return None
         return Job(
             fp=row["fp"],
+            platform=row["platform"] or "",
             platform_id=row["platform_id"],
             pickup_addr=row["pickup_addr"],
             dropoff_addr=row["dropoff_addr"],
@@ -138,6 +145,7 @@ async def get_job(fp: str) -> Job | None:
             status=JobStatus(row["status"]),
             first_seen=row["first_seen"],
             gone_at=row["gone_at"],
+            required_license=row["required_license"],
         )
 
 
@@ -505,7 +513,7 @@ async def list_open_jobs(limit: int = 50) -> list[Job]:
             await conn.execute(
                 text(
                     """
-                    SELECT fp, platform_id, pickup_addr, dropoff_addr,
+                    SELECT fp, platform, platform_id, pickup_addr, dropoff_addr,
                            ST_Y(pickup_geom::geometry) AS pickup_lat, ST_X(pickup_geom::geometry) AS pickup_lon,
                            ST_Y(dropoff_geom::geometry) AS dropoff_lat, ST_X(dropoff_geom::geometry) AS dropoff_lon,
                            price_eur, route_km, pickup_date, url, status, first_seen, gone_at
@@ -518,7 +526,8 @@ async def list_open_jobs(limit: int = 50) -> list[Job]:
         ).mappings().all()
         return [
             Job(
-                fp=r["fp"], platform_id=r["platform_id"], pickup_addr=r["pickup_addr"], dropoff_addr=r["dropoff_addr"],
+                fp=r["fp"], platform=r["platform"] or "", platform_id=r["platform_id"],
+                pickup_addr=r["pickup_addr"], dropoff_addr=r["dropoff_addr"],
                 pickup_lat=r["pickup_lat"], pickup_lon=r["pickup_lon"],
                 dropoff_lat=r["dropoff_lat"], dropoff_lon=r["dropoff_lon"],
                 price_eur=float(r["price_eur"]) if r["price_eur"] is not None else None,

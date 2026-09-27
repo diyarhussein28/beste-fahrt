@@ -1,5 +1,7 @@
 # Fleet Dispatch Monitor — Read-Only Bot
 
+[![tests](https://github.com/diyarhussein28/beste-fahrt/actions/workflows/tests.yml/badge.svg)](https://github.com/diyarhussein28/beste-fahrt/actions/workflows/tests.yml)
+
 نظام مراقبة وتوجيه ذكي لأسطول نقل السيارات: يقرأ عروض النقل الجديدة من منصة
 الأسطول، يطابقها مع أقرب سائق متاح، ويرسل تنبيهاً فورياً عبر Telegram —
 **بدون أي حجز آلي**. الحجز نفسه دائماً قرار بشري بضغطة زر. يبحث النظام أيضاً
@@ -28,6 +30,7 @@
 | Shared | [`shared/`](shared/) | الإعدادات، النماذج، الوصول لقاعدة البيانات، طابور الأحداث |
 | Migrations | [`migrations/`](migrations/) | مخطط قاعدة البيانات (PostgreSQL + PostGIS) |
 | Ops | [`ops/`](ops/) | النبضات، النسخ الاحتياطي، التقارير الأسبوعية |
+| Scripts | [`scripts/`](scripts/) | أدوات سطر أوامر لإدارة السائقين وبيانات تجريبية |
 
 ## البدء السريع (تطوير محلي)
 
@@ -49,7 +52,32 @@ docker compose up -d --build
 
 `docker-compose.yml` يشغّل: `db` (PostgreSQL+PostGIS)، `redis`، `migrate`
 (يُطبَّق مرة عند الإقلاع)، ثم `collector`، `matcher`، `returns`،
-`dispatcher`، و`admin`.
+`dispatcher`، `admin`، و`ops` (النبضات + التقرير الأسبوعي).
+
+## إعداد السائقين
+
+لا يوجد نموذج ويب لإضافة سائقين بعد (اللوحة قراءة فقط عمداً) — استخدم:
+
+```bash
+# بيانات تجريبية لعشرة سائقين حول Leverkusen (للتطوير/العرض فقط)
+docker compose exec collector python -m scripts.seed_demo_drivers
+
+# ربط سائق حقيقي بحسابه على Telegram (chat_id يظهر أول مرة يراسل فيها البوت)
+docker compose exec collector python -m scripts.manage_driver link-telegram "Ahmed K." 123456789
+docker compose exec collector python -m scripts.manage_driver set-home "Ahmed K." 51.0459 7.0192 --city Leverkusen
+docker compose exec collector python -m scripts.manage_driver set-consent "Ahmed K." on
+```
+
+راجع [`scripts/manage_driver.py`](scripts/manage_driver.py) لباقي الأوامر
+(الرخص، إلغاء التفعيل...).
+
+## لوحة الإدارة والتقارير
+
+- اللوحة: `http://<server>:8080` (HTTP Basic — المستخدم `admin`، كلمة المرور
+  `ADMIN_SECRET_KEY` من `.env`). تعرض حالة السائقين، العروض المفتوحة، آخر
+  التنبيهات، ومؤشرات آخر 7 أيام (القسم 15).
+- تقرير أسبوعي تلقائي يُرسل لقناة المدير على Telegram كل إثنين 08:00
+  ([`ops/weekly_report.py`](ops/weekly_report.py)).
 
 ## ربط منصة حقيقية
 

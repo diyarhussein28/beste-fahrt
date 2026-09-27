@@ -10,10 +10,10 @@ import asyncio
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from shared.config import get_config, get_secrets
-from shared.db import get_driver, get_driver_by_chat_id, get_job, record_dispatch_response, try_claim_job
+from shared.db import get_driver, get_driver_by_chat_id, get_job, record_dispatch_response, record_driver_location, try_claim_job
 from shared.events import ack, consume
 from shared.logging_config import configure_logging
 from shared.models import JobStatus, RankedDriver, WatchStatus
@@ -95,6 +95,26 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         log.warning("unknown callback action", extra={"extra_fields": {"data": query.data}})
         await query.answer()
+
+
+async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Live Location عبر Telegram — القسم 6.1 (أعلى دقة). Only recorded for
+    a whitelisted, consenting driver; anything else is ignored per القسم 10.
+    """
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    location = update.message.location if update.message else None
+    if chat_id is None or location is None:
+        return
+
+    driver = await get_driver_by_chat_id(chat_id)
+    if driver is None:
+        return
+    if not driver.location_consent:
+        # القسم 11.3: التتبّع فقط بموافقة صريحة.
+        await update.message.reply_text("لم تُفعّل مشاركة الموقع بعد — تواصل مع المدير لتفعيلها.")
+        return
+
+    await record_driver_location(driver.id, location.latitude, location.longitude, source="live_share")
 
 
 async def send_offer_to_driver(candidate: RankedDriver, job, rank: int) -> None:
@@ -212,6 +232,7 @@ async def run() -> None:
 
     _APP = Application.builder().token(secrets.telegram_bot_token).build()
     _APP.add_handler(CallbackQueryHandler(on_callback))
+    _APP.add_handler(MessageHandler(filters.LOCATION, on_location))
 
     await _APP.initialize()
     await _APP.start()

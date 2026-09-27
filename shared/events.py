@@ -17,7 +17,11 @@ STREAM_MAXLEN = 10_000
 
 @lru_cache
 def get_redis() -> redis.Redis:
-    return redis.from_url(get_secrets().redis_url, decode_responses=True)
+    # socket_timeout=None is required for blocking commands (XREADGROUP ...
+    # BLOCK): with a finite client-side read timeout, the client can time out
+    # waiting on the socket before the server's own BLOCK window elapses and
+    # responds, even though nothing is actually wrong with the connection.
+    return redis.from_url(get_secrets().redis_url, decode_responses=True, socket_timeout=None, socket_connect_timeout=5)
 
 
 async def publish(stream: str, payload: dict[str, Any] | str) -> str:

@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -134,6 +134,13 @@ class Secrets(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_manager_chat_id: int = 0
+
+    @field_validator("telegram_manager_chat_id", mode="before")
+    @classmethod
+    def _empty_chat_id_is_unset(cls, v: object) -> object:
+        # An empty .env value ("TELEGRAM_MANAGER_CHAT_ID=") would otherwise
+        # fail int parsing before the manager has linked their chat_id.
+        return 0 if v == "" else v
 
     nominatim_url: str = "https://nominatim.openstreetmap.org"
     osrm_url: str = ""

@@ -47,9 +47,9 @@ async def dashboard(request: Request, _=Depends(require_auth)) -> HTMLResponse:
     dispatches = await list_recent_dispatches()
     kpis = await compute_kpis(window_days=7)
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "drivers": drivers,
             "jobs": jobs,
             "dispatches": dispatches,

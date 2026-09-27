@@ -5,9 +5,16 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+
+try:
+    from enum import StrEnum  # Python 3.11+
+except ImportError:  # pragma: no cover — collector's Playwright base image ships Python 3.10
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 
 
 class DriverStatus(StrEnum):

@@ -51,6 +51,7 @@ return_trip:
   watch_expires_after_hours: 4
   max_chain_legs: 2
   transit_cost_per_km: 0.15 # rough train estimate
+  wait_penalty_eur_per_hour: 5.0 # w_wait in القسم 8.6's scoring formula
 
 privacy:
   location_retention_days: 30

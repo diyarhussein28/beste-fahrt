@@ -82,7 +82,7 @@ def render_combined_alert(
 
 
 def render_return_alert(
-    ret: ReturnCandidate, hours_after_eta: float, km_from_home: float, privacy: PrivacyConfig
+    ret: ReturnCandidate, hours_after_eta: float, km_from_home: float, privacy: PrivacyConfig, watch_id: int
 ) -> tuple[str, Buttons]:
     """تنبيه عودة لاحق لصاحب طلب العودة المفتوح فقط — القسم 8.10 (التنبيه الثاني)."""
     date_str = ret.job.pickup_date.strftime("%d.%m.%Y – %H:%M") if ret.job.pickup_date else "—"
@@ -99,8 +99,8 @@ def render_return_alert(
     buttons: Buttons = [
         [
             ("✅ سآخذها", f"acc:{ret.job.fp}"),
-            ("⏭️ ابحث عن غيرها", f"skip_return:{ret.job.fp}"),
-            ("🚆 سأعود بالقطار", f"declare_train:{ret.job.fp}"),
+            ("⏭️ ابحث عن غيرها", f"skip_return:{ret.job.fp}:{watch_id}"),
+            ("🚆 سأعود بالقطار", f"declare_train:{ret.job.fp}:{watch_id}"),
         ]
     ]
     return text, buttons

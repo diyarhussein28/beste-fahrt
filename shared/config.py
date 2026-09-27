@@ -84,6 +84,10 @@ class ReturnTripConfig(BaseModel):
     watch_expires_after_hours: float = 4.0
     max_chain_legs: int = 2
     transit_cost_per_km: float = 0.15
+    # Not in the appendix's config.yaml sample but required by the القسم 8.6
+    # formula (`wait_penalty = w_wait * hours`); tunable here rather than a
+    # hardcoded constant.
+    wait_penalty_eur_per_hour: float = 5.0
 
 
 class PrivacyConfig(BaseModel):

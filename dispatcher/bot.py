@@ -13,12 +13,14 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 from shared.config import get_config, get_secrets
-from shared.db import get_driver_by_chat_id, record_dispatch_response, try_claim_job
+from shared.db import get_driver, get_driver_by_chat_id, get_job, record_dispatch_response, try_claim_job
 from shared.events import ack, consume
 from shared.logging_config import configure_logging
-from shared.models import JobStatus, RankedDriver
+from shared.models import JobStatus, RankedDriver, WatchStatus
 
 from matcher.service import rank_job
+from returns.finder import check_job_against_watch, find_before_dispatch
+from returns.watches import close_watch, get_watch, open_watch, reopen_watch
 from dispatcher import escalation, templates
 
 log = logging.getLogger("dispatcher.bot")
@@ -44,7 +46,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     action, _, rest = query.data.partition(":")
-    job_fp = rest.split(":")[0]
+    parts = rest.split(":")
+    job_fp = parts[0]
 
     if action == "acc" or action == "accboth":
         claimed = await try_claim_job(job_fp, JobStatus.DISPATCHED)
@@ -62,15 +65,32 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"✅ {driver.name} قبل العرض {job_fp[:8]}…",
             )
 
+        # القسم 8.2: قبول رحلة ذهاب يفتح تلقائياً طلب عودة مفتوح، إلا إذا كان
+        # السائق قد أخذ الرحلتين معاً بالفعل عبر "آخذ الاثنتين".
+        return_config = get_config().return_trip
+        if action == "acc" and return_config.enabled:
+            job = await get_job(job_fp)
+            if job is not None:
+                watch = await open_watch(driver, job, return_config)
+                if watch is not None:
+                    log.info("return watch opened after acceptance", extra={"extra_fields": {"fp": job_fp, "watch_id": watch.id}})
+
     elif action == "dec":
         await record_dispatch_response(job_fp, driver.id, "decline")
         await query.answer("تم تسجيل الرفض")
         await query.edit_message_text(query.message.text + "\n\n❌ تم الرفض")
 
-    elif action in ("skip_return", "declare_train"):
-        # Full return-watch handling lives in returns/watches.py — this just
-        # acknowledges the tap so the driver isn't left hanging.
-        await query.answer("تم التسجيل")
+    elif action == "skip_return":
+        watch_id = int(parts[1])
+        await query.answer("سنواصل البحث عن عودة أخرى")
+        await query.edit_message_text(query.message.text + "\n\n⏭️ يواصل النظام البحث عن رحلة عودة أخرى")
+        await reopen_watch(watch_id)
+
+    elif action == "declare_train":
+        watch_id = int(parts[1])
+        await query.answer("تم التسجيل — عودة سعيدة")
+        await query.edit_message_text(query.message.text + "\n\n🚆 سيعود السائق بالقطار")
+        await close_watch(watch_id, WatchStatus.CLOSED)
 
     else:
         log.warning("unknown callback action", extra={"extra_fields": {"data": query.data}})
@@ -78,10 +98,28 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def send_offer_to_driver(candidate: RankedDriver, job, rank: int) -> None:
-    privacy = get_config().privacy
-    text, buttons = templates.render_offer_alert(job, candidate.approach_km, privacy)
-    app: Application = _APP
-    await app.bot.send_message(
+    cfg = get_config()
+    privacy = cfg.privacy
+    return_cfg = cfg.return_trip
+
+    # القسم 8.2/8.11: قبل إرسال أي عرض ذهاب بعيد، ابحث عن رحلة عودة وأرفقها
+    # بنفس التنبيه — فقط لأفضل سائق (rank 1) ولديه نقطة أساس (منزل) محفوظة.
+    ret = None
+    if (
+        rank == 1
+        and return_cfg.enabled
+        and (job.route_km or 0) >= return_cfg.trigger_min_outbound_km
+        and candidate.driver.home_lat is not None
+        and candidate.driver.home_lon is not None
+    ):
+        ret = await find_before_dispatch(job, candidate.driver.home_lat, candidate.driver.home_lon, return_cfg)
+
+    if ret is not None:
+        text, buttons = templates.render_combined_alert(job, candidate.approach_km, ret, privacy)
+    else:
+        text, buttons = templates.render_offer_alert(job, candidate.approach_km, privacy)
+
+    await _APP.bot.send_message(
         candidate.driver.telegram_chat_id,
         text,
         reply_markup=_keyboard(buttons),
@@ -133,6 +171,35 @@ async def consume_manager_alerts() -> None:
             await ack("alert.manager", "dispatcher", message_id)
 
 
+async def consume_return_matched() -> None:
+    """القسم 8.10 (التنبيه الثاني) — رحلة عودة عُثر عليها لطلب مفتوح."""
+    async for message_id, payload in consume("return.matched", "dispatcher", "dispatcher-1"):
+        try:
+            watch = await get_watch(payload["watch_id"])
+            job = await get_job(payload["fp"])
+            if watch is None or job is None:
+                continue
+            driver = await get_driver(watch.driver_id)
+            if driver is None or driver.telegram_chat_id is None:
+                continue
+
+            candidate = check_job_against_watch(job, watch, get_config().return_trip)
+            if candidate is None:
+                continue
+
+            hours_after_eta = max(0.0, (job.pickup_date - watch.available_at).total_seconds() / 3600) if job.pickup_date else 0.0
+            text, buttons = templates.render_return_alert(
+                candidate, hours_after_eta, candidate.remaining_km, get_config().privacy, watch.id
+            )
+            await _APP.bot.send_message(
+                driver.telegram_chat_id, text, reply_markup=_keyboard(buttons), disable_web_page_preview=True
+            )
+        except Exception:
+            log.exception("failed to process return.matched event", extra={"extra_fields": {"payload": payload}})
+        finally:
+            await ack("return.matched", "dispatcher", message_id)
+
+
 _APP: Application
 
 
@@ -151,7 +218,7 @@ async def run() -> None:
     await _APP.updater.start_polling()
     log.info("dispatcher bot started")
     try:
-        await asyncio.gather(consume_dispatch_ready(), consume_manager_alerts())
+        await asyncio.gather(consume_dispatch_ready(), consume_manager_alerts(), consume_return_matched())
     finally:
         await _APP.updater.stop()
         await _APP.stop()

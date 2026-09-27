@@ -176,6 +176,41 @@ async def get_driver_by_chat_id(chat_id: int) -> Driver | None:
         )
 
 
+async def get_driver(driver_id: int) -> Driver | None:
+    async with get_engine().connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT id, name, telegram_chat_id, phone, status, active,
+                           location_consent, license_classes, jobs_today, allow_overnight,
+                           ST_Y(home_geom::geometry) AS home_lat, ST_X(home_geom::geometry) AS home_lon,
+                           home_city
+                    FROM drivers WHERE id = :id
+                    """
+                ),
+                {"id": driver_id},
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return Driver(
+            id=row["id"],
+            name=row["name"],
+            telegram_chat_id=row["telegram_chat_id"],
+            phone=row["phone"],
+            status=DriverStatus(row["status"]),
+            active=row["active"],
+            location_consent=row["location_consent"],
+            license_classes=list(row["license_classes"] or []),
+            jobs_today=row["jobs_today"],
+            home_lat=row["home_lat"],
+            home_lon=row["home_lon"],
+            home_city=row["home_city"],
+            allow_overnight=row["allow_overnight"],
+        )
+
+
 async def record_driver_location(driver_id: int, lat: float, lon: float, source: str) -> None:
     async with get_engine().begin() as conn:
         await conn.execute(
@@ -197,7 +232,9 @@ async def ranked_drivers_for_job(job_fp: str, limit: int = 5) -> list[RankedDriv
                 text(
                     """
                     SELECT d.id, d.name, d.telegram_chat_id, d.phone, d.status,
-                           d.active, d.location_consent,
+                           d.active, d.location_consent, d.license_classes, d.jobs_today,
+                           d.allow_overnight, d.home_city,
+                           ST_Y(d.home_geom::geometry) AS home_lat, ST_X(d.home_geom::geometry) AS home_lon,
                            ST_Distance(l.geom, j.pickup_geom) / 1000 AS approach_km,
                            EXTRACT(EPOCH FROM now() - l.recorded_at) / 60 AS loc_age_min
                     FROM drivers d
@@ -225,6 +262,12 @@ async def ranked_drivers_for_job(job_fp: str, limit: int = 5) -> list[RankedDriv
                 status=DriverStatus(row["status"]),
                 active=row["active"],
                 location_consent=row["location_consent"],
+                license_classes=list(row["license_classes"] or []),
+                jobs_today=row["jobs_today"],
+                home_lat=row["home_lat"],
+                home_lon=row["home_lon"],
+                home_city=row["home_city"],
+                allow_overnight=row["allow_overnight"],
             ),
             approach_km=float(row["approach_km"]),
             loc_age_min=float(row["loc_age_min"]),

@@ -83,7 +83,7 @@ def test_render_return_alert_has_train_option():
         job=ret_job, deadhead_km=18.0, remaining_km=3.0, progress=0.9,
         net_value=200.0, wait_penalty=0.0, return_score=200.0, category="A",
     )
-    text, buttons = render_return_alert(ret, hours_after_eta=1.4, km_from_home=3.0, privacy=PRIVACY_FULL)
+    text, buttons = render_return_alert(ret, hours_after_eta=1.4, km_from_home=3.0, privacy=PRIVACY_FULL, watch_id=42)
     assert "رحلة عودة" in text
     labels = [label for row in buttons for label, _ in row]
     assert "🚆 سأعود بالقطار" in labels

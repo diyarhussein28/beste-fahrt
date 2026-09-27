@@ -91,6 +91,91 @@ async def set_job_status(fp: str, status: JobStatus) -> None:
         )
 
 
+async def try_claim_job(fp: str, new_status: JobStatus = JobStatus.DISPATCHED) -> bool:
+    """Atomically flips an 'open' job to `new_status`. Returns False if it was
+    already claimed — used to make "first accept wins" race-safe in broadcast
+    mode (القسم 7.2).
+    """
+    async with get_engine().begin() as conn:
+        result = await conn.execute(
+            text("UPDATE jobs SET status = :status WHERE fp = :fp AND status = 'open'"),
+            {"status": new_status.value, "fp": fp},
+        )
+        return (result.rowcount or 0) > 0
+
+
+async def get_job(fp: str) -> Job | None:
+    async with get_engine().connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT fp, platform_id, pickup_addr, dropoff_addr,
+                           ST_Y(pickup_geom::geometry) AS pickup_lat, ST_X(pickup_geom::geometry) AS pickup_lon,
+                           ST_Y(dropoff_geom::geometry) AS dropoff_lat, ST_X(dropoff_geom::geometry) AS dropoff_lon,
+                           price_eur, route_km, pickup_date, url, status, first_seen, gone_at
+                    FROM jobs WHERE fp = :fp
+                    """
+                ),
+                {"fp": fp},
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return Job(
+            fp=row["fp"],
+            platform_id=row["platform_id"],
+            pickup_addr=row["pickup_addr"],
+            dropoff_addr=row["dropoff_addr"],
+            pickup_lat=row["pickup_lat"],
+            pickup_lon=row["pickup_lon"],
+            dropoff_lat=row["dropoff_lat"],
+            dropoff_lon=row["dropoff_lon"],
+            price_eur=float(row["price_eur"]) if row["price_eur"] is not None else None,
+            route_km=float(row["route_km"]) if row["route_km"] is not None else None,
+            pickup_date=row["pickup_date"],
+            url=row["url"],
+            status=JobStatus(row["status"]),
+            first_seen=row["first_seen"],
+            gone_at=row["gone_at"],
+        )
+
+
+async def get_driver_by_chat_id(chat_id: int) -> Driver | None:
+    async with get_engine().connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT id, name, telegram_chat_id, phone, status, active,
+                           location_consent, license_classes, jobs_today, allow_overnight,
+                           ST_Y(home_geom::geometry) AS home_lat, ST_X(home_geom::geometry) AS home_lon,
+                           home_city
+                    FROM drivers WHERE telegram_chat_id = :chat_id
+                    """
+                ),
+                {"chat_id": chat_id},
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return Driver(
+            id=row["id"],
+            name=row["name"],
+            telegram_chat_id=row["telegram_chat_id"],
+            phone=row["phone"],
+            status=DriverStatus(row["status"]),
+            active=row["active"],
+            location_consent=row["location_consent"],
+            license_classes=list(row["license_classes"] or []),
+            jobs_today=row["jobs_today"],
+            home_lat=row["home_lat"],
+            home_lon=row["home_lon"],
+            home_city=row["home_city"],
+            allow_overnight=row["allow_overnight"],
+        )
+
+
 async def record_driver_location(driver_id: int, lat: float, lon: float, source: str) -> None:
     async with get_engine().begin() as conn:
         await conn.execute(

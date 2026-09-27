@@ -7,8 +7,10 @@ def make_parser() -> MovacarProParser:
 
 
 def test_parse_card_text_basic_ride():
+    # Confirmed against the live site: price sits between the tier badge and
+    # the route, and the card the extraction JS grabs also carries the date.
     parser = make_parser()
-    text = "Bronze Weiden → Saal a. d. Donau Fr 25.09.2026 12:48 → Di 29.09.2026 16:00 56,00 €"
+    text = "Bronze 56,00 € Weiden → Saal a. d. Donau Fr 25.09.2026 12:48 → Di 29.09.2026 16:00"
     offer = parser._parse_card_text(text)
     assert offer is not None
     assert offer.pickup_address == "Weiden"
@@ -23,9 +25,19 @@ def test_parse_card_text_basic_ride():
     assert offer.required_license is None
 
 
+def test_parse_card_text_without_tier_badge():
+    # Some live cards had no visible tier word at all.
+    parser = make_parser()
+    text = "53,00 € Warendorf → Osnabrück Di 29.09.2026 09:00 → Di 29.09.2026 12:00"
+    offer = parser._parse_card_text(text)
+    assert offer is not None
+    assert offer.pickup_address == "Warendorf"
+    assert offer.dropoff_address == "Osnabrück"
+
+
 def test_parse_card_text_with_requirement_tag():
     parser = make_parser()
-    text = "Bronze Kassel → Lohfelden Fr 02.10.2026 13:00 → Fr 02.10.2026 15:00 Transport auf Anhänger 42,00 €"
+    text = "Bronze 42,00 € Kassel → Lohfelden Fr 02.10.2026 13:00 → Fr 02.10.2026 15:00 Transport auf Anhänger"
     offer = parser._parse_card_text(text)
     assert offer is not None
     assert offer.required_license == "anhaenger"
@@ -33,7 +45,7 @@ def test_parse_card_text_with_requirement_tag():
 
 def test_parse_card_text_with_thousand_separator_price():
     parser = make_parser()
-    text = "Gold Bochum → Niederaula Mi 30.09.2026 10:30 → Mi 30.09.2026 12:00 1.132,00 €"
+    text = "Gold 1.132,00 € Bochum → Niederaula Mi 30.09.2026 10:30 → Mi 30.09.2026 12:00"
     offer = parser._parse_card_text(text)
     assert offer is not None
     assert offer.price_eur == 1132.00
@@ -46,4 +58,15 @@ def test_parse_card_text_missing_price_returns_none():
 
 def test_parse_card_text_missing_route_arrow_returns_none():
     parser = make_parser()
-    assert parser._parse_card_text("Bronze Weiden Saal a. d. Donau 56,00 €") is None
+    assert parser._parse_card_text("Bronze 56,00 € Weiden Saal a. d. Donau") is None
+
+
+def test_parse_card_text_without_date_still_parses_route_and_price():
+    # No date match -> route_end falls back to end of string; still usable.
+    parser = make_parser()
+    text = "Bronze 56,00 € Weiden → Saal a. d. Donau"
+    offer = parser._parse_card_text(text)
+    assert offer is not None
+    assert offer.pickup_address == "Weiden"
+    assert offer.dropoff_address == "Saal a. d. Donau"
+    assert offer.pickup_date is None

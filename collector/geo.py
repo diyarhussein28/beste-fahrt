@@ -7,8 +7,10 @@ and close.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import time
 
 import httpx
 from sqlalchemy import text
@@ -18,6 +20,16 @@ from shared.db import active_service_areas, get_engine
 from matcher.routing import haversine_km
 
 log = logging.getLogger("collector.geo")
+
+# Nominatim's usage policy caps public-instance requests at 1/second; a
+# platform with rides spread across the whole country can easily produce a
+# few dozen distinct addresses in one poll cycle, which without this
+# throttle blew straight through that limit and got 429'd on most of them —
+# self-hosting Nominatim (القسم 4 mentions this) removes the need for this
+# once it matters enough to bother.
+_MIN_REQUEST_INTERVAL_S = 1.1
+_rate_limit_lock = asyncio.Lock()
+_last_request_at = 0.0
 
 
 async def geocode(address: str) -> tuple[float, float] | None:
@@ -55,8 +67,18 @@ async def geocode(address: str) -> tuple[float, float] | None:
     return lat, lon
 
 
+async def _throttle_nominatim() -> None:
+    global _last_request_at
+    async with _rate_limit_lock:
+        wait = _MIN_REQUEST_INTERVAL_S - (time.monotonic() - _last_request_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_request_at = time.monotonic()
+
+
 async def _geocode_via_nominatim(address: str) -> tuple[float, float] | None:
     base_url = get_secrets().nominatim_url
+    await _throttle_nominatim()
     try:
         async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "fleet-dispatch-monitor/1.0"}) as client:
             resp = await client.get(

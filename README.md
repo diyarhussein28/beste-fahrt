@@ -54,22 +54,35 @@ docker compose up -d --build
 (يُطبَّق مرة عند الإقلاع)، ثم `collector`، `matcher`، `returns`،
 `dispatcher`، `admin`، و`ops` (النبضات + التقرير الأسبوعي).
 
-## إعداد السائقين
+## إدارة السائقين (من داخل Telegram — أنت فقط)
 
-لا يوجد نموذج ويب لإضافة سائقين بعد (اللوحة قراءة فقط عمداً) — استخدم:
+كل أوامر الإدارة محصورة بصاحب `TELEGRAM_MANAGER_CHAT_ID` في `.env` — أي
+شخص آخر يكتبها يحصل على "هذا الأمر مخصّص للمدير فقط" ولا يتم تنفيذ شيء
+([`dispatcher/manager_commands.py`](dispatcher/manager_commands.py)).
 
+| الأمر | الوظيفة |
+|---|---|
+| `/drivers` | قائمة كل السائقين وحالتهم |
+| `/add_driver <الاسم>` | يضيف سائقاً جديداً ويرسل لك رابط دعوة تبعثه له |
+| `/remove_driver <الاسم>` | يوقف سائقاً فوراً (لا يحذف سجلّه/تاريخه) |
+| `/activate_driver <الاسم>` | يعيد تفعيل سائق موقوف |
+| `/set_home <الاسم> <lat>,<lon> [مدينة]` | يضبط منزل السائق (ضروري لرحلة العودة) |
+
+**تدفّق توظيف سائق جديد:**
+1. تكتب `/add_driver Ahmed K.` → يردّ عليك البوت برابط دعوة.
+2. تبعث الرابط للسائق الجديد على تيليغرام، يضغط "Start" فيرتبط حسابه تلقائياً.
+3. تضبط منزله: `/set_home Ahmed K. 51.0459,7.0192 Leverkusen`.
+4. السائق نفسه يرسل `/consent_on` لتفعيل مشاركة موقعه المباشر (اختياري لكنه يحسّن الدقة).
+
+**عندما ينتهي عمل سائق معك:** `/remove_driver Ahmed K.` — يتوقف فوراً عن
+استقبال أي عرض جديد.
+
+للبيانات التجريبية فقط (اختبار محلي بدون سائقين حقيقيين):
 ```bash
-# بيانات تجريبية لعشرة سائقين حول Leverkusen (للتطوير/العرض فقط)
 docker compose exec collector python -m scripts.seed_demo_drivers
-
-# ربط سائق حقيقي بحسابه على Telegram (chat_id يظهر أول مرة يراسل فيها البوت)
-docker compose exec collector python -m scripts.manage_driver link-telegram "Ahmed K." 123456789
-docker compose exec collector python -m scripts.manage_driver set-home "Ahmed K." 51.0459 7.0192 --city Leverkusen
-docker compose exec collector python -m scripts.manage_driver set-consent "Ahmed K." on
 ```
-
-راجع [`scripts/manage_driver.py`](scripts/manage_driver.py) لباقي الأوامر
-(الرخص، إلغاء التفعيل...).
+هناك أيضاً [`scripts/manage_driver.py`](scripts/manage_driver.py) كأداة
+سطر أوامر بديلة لنفس العمليات إن احتجتها من الخادم مباشرة.
 
 ## لوحة الإدارة والتقارير
 

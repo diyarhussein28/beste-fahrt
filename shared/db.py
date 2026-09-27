@@ -211,6 +211,123 @@ async def get_driver(driver_id: int) -> Driver | None:
         )
 
 
+async def find_driver_by_name(name: str) -> Driver | None:
+    """Case-insensitive exact match — used by the manager's /remove_driver
+    and /activate_driver bot commands.
+    """
+    async with get_engine().connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT id, name, telegram_chat_id, phone, status, active,
+                           location_consent, license_classes, jobs_today, allow_overnight,
+                           ST_Y(home_geom::geometry) AS home_lat, ST_X(home_geom::geometry) AS home_lon,
+                           home_city
+                    FROM drivers WHERE lower(name) = lower(:name)
+                    """
+                ),
+                {"name": name},
+            )
+        ).mappings().first()
+        if row is None:
+            return None
+        return Driver(
+            id=row["id"], name=row["name"], telegram_chat_id=row["telegram_chat_id"], phone=row["phone"],
+            status=DriverStatus(row["status"]), active=row["active"], location_consent=row["location_consent"],
+            license_classes=list(row["license_classes"] or []), jobs_today=row["jobs_today"],
+            home_lat=row["home_lat"], home_lon=row["home_lon"], home_city=row["home_city"],
+            allow_overnight=row["allow_overnight"],
+        )
+
+
+async def add_driver(name: str) -> Driver:
+    async with get_engine().begin() as conn:
+        row = (
+            await conn.execute(
+                text("INSERT INTO drivers (name, status, active) VALUES (:n, 'off_duty', TRUE) RETURNING id"),
+                {"n": name},
+            )
+        ).first()
+    return Driver(id=row.id, name=name, status=DriverStatus.OFF_DUTY, active=True)
+
+
+async def set_driver_active(driver_id: int, active: bool) -> None:
+    """Deactivating stops a driver from ever being ranked/dispatched to
+    again, without touching their historical dispatches/KPI data — القسم
+    10's "أقل صلاحية" principle applied to offboarding, not a hard delete.
+    """
+    async with get_engine().begin() as conn:
+        if active:
+            await conn.execute(text("UPDATE drivers SET active = TRUE WHERE id = :id"), {"id": driver_id})
+        else:
+            await conn.execute(
+                text("UPDATE drivers SET active = FALSE, status = 'off_duty' WHERE id = :id"), {"id": driver_id}
+            )
+
+
+async def set_driver_consent(chat_id: int, consent: bool) -> bool:
+    """Driver self-service — القسم 11.3: الموافقة يجب أن تكون من صاحب البيانات."""
+    async with get_engine().begin() as conn:
+        result = await conn.execute(
+            text("UPDATE drivers SET location_consent = :c WHERE telegram_chat_id = :chat_id"),
+            {"c": consent, "chat_id": chat_id},
+        )
+        return (result.rowcount or 0) > 0
+
+
+async def set_driver_home(driver_id: int, lat: float, lon: float, city: str | None) -> None:
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            text(
+                """
+                UPDATE drivers SET home_geom = ST_SetSRID(ST_MakePoint(:lon, :lat), 4326), home_city = :city
+                WHERE id = :id
+                """
+            ),
+            {"lat": lat, "lon": lon, "city": city, "id": driver_id},
+        )
+
+
+async def create_driver_invite(driver_id: int, code: str, ttl_days: int = 7) -> None:
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO driver_invites (code, driver_id, expires_at)
+                VALUES (:code, :driver_id, now() + make_interval(days => :ttl))
+                """
+            ),
+            {"code": code, "driver_id": driver_id, "ttl": ttl_days},
+        )
+
+
+async def consume_driver_invite(code: str, chat_id: int) -> Driver | None:
+    """Atomically claims an invite (if unused and unexpired) and links the
+    driver record to the Telegram chat_id that opened the deep link.
+    """
+    async with get_engine().begin() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    """
+                    UPDATE driver_invites SET used_at = now()
+                    WHERE code = :code AND used_at IS NULL AND expires_at > now()
+                    RETURNING driver_id
+                    """
+                ),
+                {"code": code},
+            )
+        ).first()
+        if row is None:
+            return None
+        await conn.execute(
+            text("UPDATE drivers SET telegram_chat_id = :chat_id WHERE id = :id"),
+            {"chat_id": chat_id, "id": row.driver_id},
+        )
+    return await get_driver(row.driver_id)
+
+
 async def record_driver_location(driver_id: int, lat: float, lon: float, source: str) -> None:
     async with get_engine().begin() as conn:
         await conn.execute(

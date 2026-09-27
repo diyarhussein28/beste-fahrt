@@ -10,7 +10,7 @@ import asyncio
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from shared.config import get_config, get_secrets
 from shared.db import get_driver, get_driver_by_chat_id, get_job, record_dispatch_response, record_driver_location, try_claim_job
@@ -21,7 +21,7 @@ from shared.models import JobStatus, RankedDriver, WatchStatus
 from matcher.service import rank_job
 from returns.finder import check_job_against_watch, find_before_dispatch
 from returns.watches import close_watch, get_watch, open_watch, reopen_watch
-from dispatcher import escalation, templates
+from dispatcher import escalation, manager_commands, templates
 
 log = logging.getLogger("dispatcher.bot")
 
@@ -39,9 +39,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     driver = await get_driver_by_chat_id(chat_id)
-    if driver is None:
-        # القسم 10: قائمة بيضاء بـ chat_id — تجاهل أي رسالة من غير سائق مسجّل.
-        log.warning("callback from unknown chat_id ignored", extra={"extra_fields": {"chat_id": chat_id}})
+    if driver is None or not driver.active:
+        # القسم 10: قائمة بيضاء بـ chat_id — تجاهل أي رسالة من غير سائق مسجّل
+        # أو من سائق أوقفه المدير عبر /remove_driver.
+        log.warning("callback from unknown/inactive chat_id ignored", extra={"extra_fields": {"chat_id": chat_id}})
         await query.answer("غير مصرح")
         return
 
@@ -107,7 +108,7 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     driver = await get_driver_by_chat_id(chat_id)
-    if driver is None:
+    if driver is None or not driver.active:
         return
     if not driver.location_consent:
         # القسم 11.3: التتبّع فقط بموافقة صريحة.
@@ -233,6 +234,14 @@ async def run() -> None:
     _APP = Application.builder().token(secrets.telegram_bot_token).build()
     _APP.add_handler(CallbackQueryHandler(on_callback))
     _APP.add_handler(MessageHandler(filters.LOCATION, on_location))
+    _APP.add_handler(CommandHandler("start", manager_commands.cmd_start))
+    _APP.add_handler(CommandHandler("consent_on", manager_commands.cmd_consent_on))
+    _APP.add_handler(CommandHandler("consent_off", manager_commands.cmd_consent_off))
+    _APP.add_handler(CommandHandler("drivers", manager_commands.cmd_drivers))
+    _APP.add_handler(CommandHandler("add_driver", manager_commands.cmd_add_driver))
+    _APP.add_handler(CommandHandler("remove_driver", manager_commands.cmd_remove_driver))
+    _APP.add_handler(CommandHandler("activate_driver", manager_commands.cmd_activate_driver))
+    _APP.add_handler(CommandHandler("set_home", manager_commands.cmd_set_home))
 
     await _APP.initialize()
     await _APP.start()

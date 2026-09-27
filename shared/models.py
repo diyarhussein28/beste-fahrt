@@ -4,7 +4,7 @@ migrations/0001_init.sql (see القسم 5 و8.7 من الوثيقة التقن�
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -68,7 +68,7 @@ class DriverLocation(BaseModel):
     lat: float
     lon: float
     source: LocationSource
-    recorded_at: datetime = Field(default_factory=datetime.utcnow)
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class RawOffer(BaseModel):
@@ -98,8 +98,9 @@ class Job(BaseModel):
     pickup_date: datetime | None = None
     url: str | None = None
     status: JobStatus = JobStatus.OPEN
-    first_seen: datetime = Field(default_factory=datetime.utcnow)
+    first_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     gone_at: datetime | None = None
+    required_license: str | None = None  # e.g. a license class needed for large vehicles
 
     @property
     def eur_per_km(self) -> float | None:
@@ -134,7 +135,7 @@ class Dispatch(BaseModel):
     job_fp: str
     driver_id: int
     rank: int
-    sent_at: datetime = Field(default_factory=datetime.utcnow)
+    sent_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     response: DispatchResponse | None = None
     responded_at: datetime | None = None
 
@@ -165,7 +166,7 @@ class ReturnWatch(BaseModel):
     expires_at: datetime
     status: WatchStatus = WatchStatus.OPEN
     matched_fp: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class RankedDriver(BaseModel):

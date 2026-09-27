@@ -123,26 +123,40 @@ class Job(BaseModel):
         return self.price_eur / self.route_km
 
 
+FINGERPRINT_LENGTH = 16  # hex chars = 64 bits — see the docstring below for why
+
+
 def job_fingerprint(raw: RawOffer) -> str:
     """Stable id for dedup — see القسم 4.4.
 
-    Namespaced by platform so two different platforms can't collide even if
-    they happen to reuse the same numbering scheme for their own ids. Uses
-    the platform's own id when available, otherwise a SHA-256 hash of the
-    fields that identify an offer regardless of cosmetic re-renders.
+    Always a short hash, never the platform's raw id or the full SHA-256
+    digest verbatim: this value ends up inside Telegram inline-button
+    callback_data (e.g. "acc:<fp>", or two of them at once in
+    "accboth:<fp>:<fp>"), which has a hard 64-byte limit. A platform's own
+    id is short in practice but not guaranteed to be, and a full SHA-256
+    digest (64 hex chars) alone already blows the limit once combined with
+    even the shortest prefix — that combination is exactly what surfaced
+    this in production against a real platform with no exposed offer id.
+    64 bits (16 hex chars) is still effectively collision-free at this
+    application's scale (a fleet's total lifetime job count, not billions).
+
+    Namespaced by platform (hashed in, not concatenated raw) so two
+    different platforms can't collide even if they reuse the same
+    numbering scheme for their own ids.
     """
     if raw.platform_id:
-        return f"{raw.platform}:{raw.platform_id}"
-    key = "|".join(
-        [
-            raw.platform,
-            raw.pickup_address.strip().lower(),
-            raw.dropoff_address.strip().lower(),
-            raw.pickup_date.isoformat() if raw.pickup_date else "",
-            f"{raw.price_eur:.2f}" if raw.price_eur is not None else "",
-        ]
-    )
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+        seed = f"{raw.platform}:{raw.platform_id}"
+    else:
+        seed = "|".join(
+            [
+                raw.platform,
+                raw.pickup_address.strip().lower(),
+                raw.dropoff_address.strip().lower(),
+                raw.pickup_date.isoformat() if raw.pickup_date else "",
+                f"{raw.price_eur:.2f}" if raw.price_eur is not None else "",
+            ]
+        )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
 
 
 class Dispatch(BaseModel):

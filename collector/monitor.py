@@ -165,8 +165,20 @@ async def platform_loop(browser, parser: OfferParser) -> None:
             backoff = float(cfg.polling.base_seconds)
 
         except LoginBlocked as e:
-            await alert_manager(f"Anmeldung gestoppt: {e} — wartet auf manuelles Eingreifen", platform=parser.name)
-            await asyncio.sleep(cfg.polling.max_backoff_seconds)
+            # Never auto-retry a CAPTCHA/2FA block: retrying every few
+            # minutes while a real challenge is active just means hitting
+            # the login page again and again, which looks exactly like the
+            # automated behavior these checks exist to catch. القسم 4.2 is
+            # explicit that this needs a human to actually resolve it, so
+            # this platform's loop stops here — restarting the collector
+            # (a deliberate action, once the manager has checked/logged in
+            # manually) is what resumes it, not a timer.
+            await alert_manager(
+                f"Anmeldung gestoppt: {e} — Polling für diese Plattform angehalten, bis der Collector manuell neu gestartet wird",
+                platform=parser.name,
+            )
+            log.error("stopping platform_loop after LoginBlocked — will not auto-retry", extra={"extra_fields": {"platform": parser.name}})
+            return
         except RateLimited:
             await alert_manager("Von der Plattform ratenbegrenzt — vorübergehend pausiert", platform=parser.name)
             await asyncio.sleep(cfg.polling.rate_limit_pause_seconds)

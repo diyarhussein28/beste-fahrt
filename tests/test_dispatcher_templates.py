@@ -13,10 +13,24 @@ from dispatcher.templates import (
 PRIVACY_FULL = PrivacyConfig(show_full_address_in_alert=True)
 PRIVACY_REDACTED = PrivacyConfig(show_full_address_in_alert=False)
 
+# Matches shared.models.FINGERPRINT_LENGTH — a real fp is never longer than
+# this, so tests use realistic values rather than an arbitrary length that
+# would hide a callback_data overflow (as a 64-char one silently did before
+# job_fingerprint() was fixed to always produce a short hash).
+FP_A = "a" * 16
+FP_B = "b" * 16
+FP_C = "c" * 16
+
+
+def _assert_callback_data_fits_telegram(buttons) -> None:
+    for row in buttons:
+        for _label, data in row:
+            assert len(data.encode("utf-8")) <= 64, f"callback_data too long for Telegram: {data!r}"
+
 
 def make_job(**kwargs) -> Job:
     base = dict(
-        fp="a" * 64,
+        fp=FP_A,
         pickup_addr="Leverkusen-Opladen, 51379",
         dropoff_addr="Düsseldorf-Flingern, 40235",
         price_eur=65.0,
@@ -43,6 +57,7 @@ def test_render_offer_alert_contains_key_fields():
     assert "65,00" in text or "65.00" in text
     assert job.url in text
     assert buttons == [[("✅ Ich nehme ihn an", f"acc:{job.fp}"), ("❌ Kann ich nicht", f"dec:{job.fp}")]]
+    _assert_callback_data_fits_telegram(buttons)
 
 
 def test_render_offer_alert_redacts_address_by_default():
@@ -55,7 +70,7 @@ def test_render_offer_alert_redacts_address_by_default():
 def test_render_combined_alert_shows_both_legs():
     outbound = make_job(pickup_addr="Leverkusen", dropoff_addr="München", price_eur=320.0, route_km=590.0)
     ret_job = make_job(
-        fp="b" * 64,
+        fp=FP_B,
         pickup_addr="München-Pasing",
         dropoff_addr="Köln",
         price_eur=300.0,
@@ -75,10 +90,11 @@ def test_render_combined_alert_shows_both_legs():
     assert "München" in text
     assert "620,00" in text or "620.00" in text  # 320 + 300 combined total
     assert len(buttons[0]) == 3
+    _assert_callback_data_fits_telegram(buttons)  # accboth:<fp>:<fp> is the tightest fit in the whole app
 
 
 def test_render_return_alert_has_train_option():
-    ret_job = make_job(fp="c" * 64)
+    ret_job = make_job(fp=FP_C)
     ret = ReturnCandidate(
         job=ret_job, deadhead_km=18.0, remaining_km=3.0, progress=0.9,
         net_value=200.0, wait_penalty=0.0, return_score=200.0, category="A",
@@ -87,6 +103,7 @@ def test_render_return_alert_has_train_option():
     assert "Rückfahrt" in text
     labels = [label for row in buttons for label, _ in row]
     assert "🚆 Ich fahre mit dem Zug zurück" in labels
+    _assert_callback_data_fits_telegram(buttons)
 
 
 def test_render_manager_escalation_mentions_attempts():

@@ -7,7 +7,7 @@
 platforms:
   - name: movacarpro
     parser: movacarpro # مطابق لـ collector/platforms.py
-    enabled: true
+    enabled: false # موقوف مؤقتاً: ظهر تحدٍّ حقيقي (CAPTCHA) بسبب محاولات تسجيل دخول متكررة أثناء الاختبار — فعّله يدوياً بعد فترة راحة
     login_url: "https://movacarpro.com/login"
     # offers_url متروك فارغاً عمداً — الـ parser ينتقل لصفحة "Alle Fahrten"
     # عبر نص الرابط بدل مسار ثابت.
@@ -37,7 +37,7 @@ polling:
 
 service_area:
   center: [51.0459, 7.0192] # Leverkusen
-  radius_km: 40
+  radius_km: 90
 
 matching:
   weights:

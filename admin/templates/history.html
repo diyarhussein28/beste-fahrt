@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Fleet Dispatch Monitor — التاريخ الكامل</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; margin: 0; padding: 24px; background: #0f172a; color: #e2e8f0; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; margin-bottom: 24px; }
+  nav a { color: #93c5fd; text-decoration: none; font-size: 0.9rem; }
+  nav a:hover { text-decoration: underline; }
+  section.driver { background: #1e293b; border-radius: 12px; padding: 18px 20px; margin-bottom: 28px; }
+  section.driver h2 { margin-top: 0; font-size: 1.2rem; }
+  h3 { font-size: 1rem; color: #94a3b8; margin-top: 20px; margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 8px; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid #0f172a; }
+  th { color: #94a3b8; font-weight: 500; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
+  .badge.accept { background: #14532d; color: #86efac; }
+  .badge.decline { background: #7f1d1d; color: #fca5a5; }
+  details summary { cursor: pointer; color: #93c5fd; margin-top: 6px; }
+  .empty { color: #64748b; padding: 20px 0; text-align: center; }
+  footer { color: #475569; font-size: 0.8rem; margin-top: 40px; }
+</style>
+</head>
+<body>
+  <nav style="float: left;"><a href="/">← الرئيسية</a></nav>
+  <h1>📁 التاريخ الكامل لكل سائق</h1>
+  <div class="subtitle">كل عرض أُرسل لأي سائق منذ أول يوم — لا يُحذف شيء أبداً، مقسّم أسبوعياً</div>
+
+  {% if not drivers %}
+    <div class="empty">لا يوجد سجلّ تنبيهات بعد.</div>
+  {% endif %}
+
+  {% for d in drivers %}
+  <section class="driver">
+    <h2>{{ d.driver_name }}</h2>
+
+    <h3>ملخّص أسبوعي</h3>
+    <table>
+      <thead><tr><th>الأسبوع</th><th>عروض أُرسلت</th><th>مقبولة</th><th>مرفوضة</th><th>الإيراد</th><th>الكم</th></tr></thead>
+      <tbody>
+        {% for w in d.weeks %}
+        <tr>
+          <td>{{ w.week_start.strftime("%d.%m.%Y") }} – {{ w.week_end.strftime("%d.%m.%Y") }}</td>
+          <td>{{ w.total_offers }}</td>
+          <td>{{ w.accepted }}</td>
+          <td>{{ w.declined }}</td>
+          <td>{{ "%.2f"|format(w.total_revenue_eur) }} €</td>
+          <td>{{ "%.1f"|format(w.total_km) }} كم</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <details>
+      <summary>السجلّ التفصيلي الكامل ({{ d.entries|length }} إرسال)</summary>
+      <table>
+        <thead><tr><th>التاريخ</th><th>العرض</th><th>السعر</th><th>الترتيب</th><th>الرد</th></tr></thead>
+        <tbody>
+          {% for e in d.entries %}
+          <tr>
+            <td>{{ e.sent_at.strftime("%d.%m.%Y %H:%M") }}</td>
+            <td>{{ e.pickup_addr }} → {{ e.dropoff_addr }}</td>
+            <td>{{ "%.2f"|format(e.price_eur) if e.price_eur is not none else "—" }} €</td>
+            <td>{{ e.rank }}</td>
+            <td>{% if e.response %}<span class="badge {{ e.response }}">{{ e.response }}</span>{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </section>
+  {% endfor %}
+
+  <footer>Fleet Dispatch Monitor — Read-Only Bot. السجلّ محفوظ بلا حدّ زمني.</footer>
+</body>
+</html>

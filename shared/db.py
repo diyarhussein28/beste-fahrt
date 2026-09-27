@@ -550,6 +550,31 @@ async def list_recent_dispatches(limit: int = 50) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+async def list_dispatch_history() -> list[dict]:
+    """Every dispatch ever recorded, oldest first — nothing here is ever
+    purged (unlike raw location pings, which القسم 11.3 caps at 30 days),
+    so this is the full history from a driver's first day to today. Grouped
+    by driver/week for the admin panel's history tab.
+    """
+    async with get_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    """
+                    SELECT d.sent_at, d.rank, d.response, d.responded_at, d.approach_km,
+                           dr.id AS driver_id, dr.name AS driver_name,
+                           j.fp AS job_fp, j.pickup_addr, j.dropoff_addr, j.price_eur, j.route_km
+                    FROM dispatches d
+                    JOIN drivers dr ON dr.id = d.driver_id
+                    JOIN jobs j ON j.fp = d.job_fp
+                    ORDER BY dr.name, d.sent_at ASC
+                    """
+                )
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
 async def active_service_areas() -> list[tuple[float, float, float]]:
     """(center_lat, center_lon, radius_km) for the base area + open return watches."""
     async with get_engine().connect() as conn:

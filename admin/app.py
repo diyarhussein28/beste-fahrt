@@ -14,8 +14,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from shared.config import get_secrets
-from shared.db import list_drivers, list_open_jobs, list_recent_dispatches
+from shared.db import list_dispatch_history, list_drivers, list_open_jobs, list_recent_dispatches
 
+from admin.history import group_history
 from ops.kpis import compute_kpis
 
 app = FastAPI(title="Fleet Dispatch Monitor — Admin")
@@ -56,3 +57,10 @@ async def dashboard(request: Request, _=Depends(require_auth)) -> HTMLResponse:
             "kpis": kpis,
         },
     )
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history(request: Request, _=Depends(require_auth)) -> HTMLResponse:
+    rows = await list_dispatch_history()
+    drivers = group_history(rows)
+    return templates.TemplateResponse(request, "history.html", {"drivers": drivers})

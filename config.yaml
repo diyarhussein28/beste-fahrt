@@ -52,7 +52,7 @@ matching:
     load: 3.0
     fit: 1.0
   stale_after_minutes: 45
-  min_eur_per_km: 0.9
+  min_eur_per_km: 0 # 0 = لا يوجد حد أدنى للربحية، كل عرض ضمن النطاق يُرسل
   top_n_for_road_distance: 5
 
 dispatch:

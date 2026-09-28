@@ -43,8 +43,8 @@ async def candidates_near_point(
                     WHERE j.status = 'open'
                       AND ST_DWithin(j.pickup_geom, :from_point, :radius_m)
                       AND ST_Distance(j.dropoff_geom, :home_point) < ST_Distance(:from_point, :home_point)
-                      AND j.pickup_date >= :after + make_interval(mins => :buffer_min)
-                      AND j.pickup_date <= :after + make_interval(hours => :max_wait)
+                      AND j.pickup_date >= CAST(:after AS timestamptz) + make_interval(mins => :buffer_min)
+                      AND j.pickup_date <= CAST(:after AS timestamptz) + make_interval(hours => :max_wait)
                     ORDER BY remaining_km ASC, j.price_eur DESC
                     LIMIT 10
                     """
